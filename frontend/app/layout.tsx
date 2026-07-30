@@ -14,15 +14,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Multi Agent Orchestration System",
+  title: "Multi Agent Orchestration System — AI Assistant",
   description:
-    "A scalable multi-agent orchestration platform with AI-powered agents for planning, research, coding, testing, and review.",
+    "AI-powered assistant with chat interface. Built with Next.js, FastAPI, and Ollama for intelligent code generation, debugging, and exploration.",
   keywords: [
     "multi-agent",
     "AI",
+    "assistant",
+    "chat",
     "orchestration",
-    "LangChain",
-    "LangGraph",
+    "Ollama",
     "FastAPI",
   ],
 };

@@ -5,6 +5,8 @@ Configures:
 - CORS middleware
 - Lifespan handler (DB init/teardown)
 - Router includes
+- Exception handlers
+- Structured logging
 """
 
 from contextlib import asynccontextmanager
@@ -13,9 +15,17 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.chat import router as chat_router
 from app.api.health import router as health_router
+from app.api.agents import router as agents_router
 from app.core.config import get_settings
+from app.core.exception_handlers import register_exception_handlers
+from app.core.logging import get_logger, setup_logging
 from app.db.database import close_db, init_db
+
+# Initialize logging before anything else
+setup_logging()
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -29,16 +39,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup
     try:
         await init_db()
-        print("[OK] Database initialized successfully")
+        logger.info("Database initialized successfully")
     except Exception as e:
-        print(f"[WARN] Database initialization failed: {e}")
-        print("   The backend will still run but DB features won't work.")
+        logger.warning("Database initialization failed: %s", e)
+        logger.warning("The backend will still run but DB features won't work.")
 
     yield
 
     # Shutdown
     await close_db()
-    print("[INFO] Database connection closed")
+    logger.info("Database connection closed")
 
 
 def create_app() -> FastAPI:
@@ -54,7 +64,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         description="Multi Agent Orchestration System API",
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
 
@@ -67,8 +77,19 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Register exception handlers
+    register_exception_handlers(app)
+
     # Include routers
     app.include_router(health_router)
+    app.include_router(chat_router)
+    app.include_router(agents_router)
+
+    logger.info(
+        "Application created: %s (model=%s)",
+        settings.app_name,
+        settings.model_name,
+    )
 
     return app
 

@@ -13,10 +13,10 @@ pydantic==2.11.3
 pydantic-settings==2.9.1
 python-dotenv==1.1.0
 
-# HTTP Client
+# HTTP Client (used for Ollama REST API)
 httpx==0.28.1
 
-# AI (install only — no logic yet)
+# AI & Orchestration
 langchain==0.3.25
 langgraph==0.4.1
 langchain-community==0.3.24

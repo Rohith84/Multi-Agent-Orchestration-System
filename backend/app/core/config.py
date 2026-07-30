@@ -36,6 +36,23 @@ class Settings(BaseSettings):
 
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
+    model_name: str = "qwen2.5-coder:7b"
+    ollama_timeout: int = 120
+
+    # Agent specific models
+    model_planner: str = "llama3.1:8b"
+    model_research: str = "llama3.1:8b"
+    model_coder: str = "qwen2.5-coder:7b"
+    model_tester: str = "qwen2.5-coder:7b"
+    model_reviewer: str = "llama3.1:8b"
+
+    # AI Assistant
+    system_prompt: str = (
+        "You are a helpful AI assistant integrated into the Multi Agent Orchestration System. "
+        "You provide clear, accurate, and well-structured responses. "
+        "When writing code, use proper formatting with markdown code blocks. "
+        "Be concise but thorough."
+    )
 
 
 @lru_cache

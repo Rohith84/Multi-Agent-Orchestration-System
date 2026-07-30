@@ -18,16 +18,15 @@ from app.core.config import get_settings
 from app.db.database import Base
 
 # Import all models here so Alembic can detect them
-# from app.models import ...  # noqa: F401  — uncomment as models are added
+from app.models.chat import ChatMessage  # noqa: F401
+from app.models.agent_execution import AgentExecution  # noqa: F401
 
 # Alembic Config object
 config = context.config
 
-# Set sqlalchemy.url from app settings
+# Set sqlalchemy.url from app settings (keep the async driver for online mode)
 settings = get_settings()
-# Convert async URL to sync for Alembic (it uses sync driver internally)
-sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
-config.set_main_option("sqlalchemy.url", sync_url)
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:

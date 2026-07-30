@@ -12,11 +12,12 @@
 
 "use client";
 
+import Link from "next/link";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { StatusCard, type StatusType } from "@/components/status-card";
 import { useSystemStatus } from "@/hooks/use-system-status";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, AlertTriangle, Shield } from "lucide-react";
+import { RefreshCw, AlertTriangle, Shield, MessageSquare } from "lucide-react";
 
 export default function DashboardPage() {
   const { data, isLoading, isError, error, refetch, isFetching } =
@@ -53,8 +54,8 @@ export default function DashboardPage() {
               Connection Error
             </p>
             <p className="text-xs text-red-400/70 mt-1">
-              {error?.message || "Unable to reach the backend server."}
-              {" "}Make sure the backend is running on{" "}
+              {error?.message || "Unable to reach the backend server."}{" "}
+              Make sure the backend is running on{" "}
               <code className="text-red-300">localhost:8000</code>.
             </p>
           </div>
@@ -143,6 +144,31 @@ export default function DashboardPage() {
           }
           icon={Shield}
         />
+      </div>
+
+      {/* AI Assistant Card */}
+      <div className="mt-10">
+        <h2 className="text-lg font-semibold text-white mb-4">Quick Actions</h2>
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <Link href="/chat" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 to-blue-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-violet-500/40 hover:shadow-lg hover:shadow-violet-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-violet-600 to-blue-500 flex items-center justify-center shadow-lg shadow-violet-500/20 group-hover:shadow-violet-500/30 transition-shadow">
+                  <MessageSquare className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-violet-300 transition-colors">
+                    AI Assistant
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Chat with the AI • Code, debug, explore
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-violet-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+        </div>
       </div>
 
       {/* Footer info */}
