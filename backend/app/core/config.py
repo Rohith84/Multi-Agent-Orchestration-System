@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     model_tester: str = "qwen2.5-coder:7b"
     model_reviewer: str = "llama3.1:8b"
 
+    # RAG Settings
+    vector_db_path: str = "chroma_db"
+    embedding_model: str = "nomic-embed-text"
+
     # AI Assistant
     system_prompt: str = (
         "You are a helpful AI assistant integrated into the Multi Agent Orchestration System. "
@@ -53,6 +57,12 @@ class Settings(BaseSettings):
         "When writing code, use proper formatting with markdown code blocks. "
         "Be concise but thorough."
     )
+
+    # MCP Settings
+    github_token: str = ""
+    mcp_workspace_path: str = str(BASE_DIR.parent)
+    mcp_max_timeout: int = 60
+    mcp_terminal_timeout: int = 30
 
 
 @lru_cache

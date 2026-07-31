@@ -16,6 +16,11 @@ python-dotenv==1.1.0
 # HTTP Client (used for Ollama REST API)
 httpx==0.28.1
 
+# Ingestion & Vector DB
+chromadb==0.6.3
+pypdf==5.1.0
+docx2txt==0.8
+
 # AI & Orchestration
 langchain==0.3.25
 langgraph==0.4.1

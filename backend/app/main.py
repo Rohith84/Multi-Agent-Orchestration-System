@@ -18,6 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
 from app.api.agents import router as agents_router
+from app.api.knowledge import router as knowledge_router
+from app.api.tools import router as tools_router
+from app.api.workflows import router as workflows_router
+from app.services.scheduler import get_workflow_scheduler
 from app.core.config import get_settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
@@ -44,9 +48,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Database initialization failed: %s", e)
         logger.warning("The backend will still run but DB features won't work.")
 
+    # Initialize MCP Server and register all tools
+    try:
+        from app.mcp.tools import register_all_tools
+        from app.mcp.server import get_mcp_server
+
+        register_all_tools()
+        mcp_server = get_mcp_server()
+        mcp_server.initialize()
+        logger.info("MCP Server initialized successfully")
+    except Exception as e:
+        logger.warning("MCP Server initialization failed: %s", e)
+        logger.warning("The backend will still run but MCP tools won't work.")
+
+    # Start background scheduler
+    scheduler = get_workflow_scheduler()
+    scheduler.start()
+
     yield
 
     # Shutdown
+    scheduler.stop()
     await close_db()
     logger.info("Database connection closed")
 
@@ -64,7 +86,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         description="Multi Agent Orchestration System API",
-        version="0.2.0",
+        version="0.4.0",
         lifespan=lifespan,
     )
 
@@ -84,6 +106,9 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(chat_router)
     app.include_router(agents_router)
+    app.include_router(knowledge_router)
+    app.include_router(tools_router)
+    app.include_router(workflows_router)
 
     logger.info(
         "Application created: %s (model=%s)",

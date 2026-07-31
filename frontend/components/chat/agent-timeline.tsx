@@ -1,6 +1,7 @@
 /**
  * AgentTimeline — visualization component displaying the multi-agent execution status and history.
  * Contains collapsible panels to inspect inputs/outputs for each agent in detail.
+ * Shows MCP tool invocations under each agent step.
  */
 
 "use client";
@@ -15,6 +16,8 @@ import {
   ChevronDown,
   ChevronUp,
   Terminal,
+  Wrench,
+  ShieldAlert,
 } from "lucide-react";
 import type { UIExecutionState } from "@/hooks/use-chat";
 
@@ -53,6 +56,8 @@ export function AgentTimeline({ executions, activeAgent }: AgentTimelineProps) {
     switch (status) {
       case "running":
         return <Loader2 className="h-5 w-5 text-violet-400 animate-spin" />;
+      case "paused_approval":
+        return <ShieldAlert className="h-5 w-5 text-amber-400 animate-pulse" />;
       case "retrying":
         return <Loader2 className="h-5 w-5 text-amber-400 animate-spin" />;
       case "success":
@@ -68,6 +73,8 @@ export function AgentTimeline({ executions, activeAgent }: AgentTimelineProps) {
     switch (status) {
       case "running":
         return "border-violet-500/30 bg-violet-500/5 text-violet-300";
+      case "paused_approval":
+        return "border-amber-500/40 bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30";
       case "retrying":
         return "border-amber-500/30 bg-amber-500/5 text-amber-300";
       case "success":
@@ -101,9 +108,11 @@ export function AgentTimeline({ executions, activeAgent }: AgentTimelineProps) {
             status: "idle",
             output: "",
             executionTime: 0,
+            toolInvocations: [],
           };
           const isExpanded = expandedAgent === agent;
           const statusClasses = getStatusClasses(state.status);
+          const toolInvocations = state.toolInvocations || [];
 
           return (
             <div
@@ -142,6 +151,33 @@ export function AgentTimeline({ executions, activeAgent }: AgentTimelineProps) {
                   </div>
                 )}
               </div>
+
+              {/* Tool Invocations */}
+              {toolInvocations.length > 0 && (
+                <div className="px-4 pb-2 space-y-1.5">
+                  {toolInvocations.map((inv, idx) => (
+                    <div
+                      key={`${inv.toolName}-${idx}`}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800/40 border border-zinc-700/30"
+                    >
+                      <Wrench className="h-3 w-3 text-orange-400 flex-shrink-0" />
+                      <span className="text-[10px] font-mono text-orange-300 flex-1 truncate">
+                        {inv.toolName}
+                      </span>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <span className="text-[10px] text-zinc-500">
+                          {inv.executionTime}s
+                        </span>
+                        {inv.status === "success" ? (
+                          <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                        ) : (
+                          <XCircle className="h-3 w-3 text-red-400" />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Collapsible Content */}
               {isExpanded && state.output && (

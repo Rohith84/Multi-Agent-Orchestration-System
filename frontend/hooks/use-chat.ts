@@ -27,14 +27,22 @@ export interface UIExecutionState {
   status: "idle" | "running" | "retrying" | "success" | "failed";
   output: string;
   executionTime: number;
+  toolInvocations: ToolInvocationUI[];
+}
+
+export interface ToolInvocationUI {
+  agent: string;
+  toolName: string;
+  status: string;
+  executionTime: number;
 }
 
 const INITIAL_EXECUTIONS: Record<string, UIExecutionState> = {
-  planner: { agentName: "planner", status: "idle", output: "", executionTime: 0 },
-  research: { agentName: "research", status: "idle", output: "", executionTime: 0 },
-  coder: { agentName: "coder", status: "idle", output: "", executionTime: 0 },
-  tester: { agentName: "tester", status: "idle", output: "", executionTime: 0 },
-  reviewer: { agentName: "reviewer", status: "idle", output: "", executionTime: 0 },
+  planner: { agentName: "planner", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
+  research: { agentName: "research", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
+  coder: { agentName: "coder", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
+  tester: { agentName: "tester", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
+  reviewer: { agentName: "reviewer", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
 };
 
 export function useChat() {
@@ -86,6 +94,7 @@ export function useChat() {
             status: ex.status as any,
             output: ex.output_content,
             executionTime: ex.execution_time,
+            toolInvocations: [],
           };
         });
         setExecutions(newExecutions);
@@ -227,6 +236,40 @@ export function useChat() {
                       timestamp: new Date().toISOString(),
                     },
                   ]);
+                  break;
+
+                case "workflow_paused_approval":
+                  setActiveAgent(data.agent);
+                  setExecutions((prev) => ({
+                    ...prev,
+                    [data.agent]: {
+                      ...prev[data.agent],
+                      status: "paused_approval" as any,
+                      output: `Waiting for human approval: ${data.message}`,
+                    },
+                  }));
+                  break;
+
+                case "tool_execution":
+                  setExecutions((prev) => {
+                    const agent = data.agent;
+                    if (!prev[agent]) return prev;
+                    return {
+                      ...prev,
+                      [agent]: {
+                        ...prev[agent],
+                        toolInvocations: [
+                          ...prev[agent].toolInvocations,
+                          {
+                            agent: data.agent,
+                            toolName: data.tool_name,
+                            status: data.status,
+                            executionTime: data.execution_time,
+                          },
+                        ],
+                      },
+                    };
+                  });
                   break;
               }
             } catch (err) {

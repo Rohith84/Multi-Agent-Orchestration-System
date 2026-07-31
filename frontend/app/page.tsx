@@ -17,7 +17,7 @@ import { DashboardHeader } from "@/components/dashboard-header";
 import { StatusCard, type StatusType } from "@/components/status-card";
 import { useSystemStatus } from "@/hooks/use-system-status";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, AlertTriangle, Shield, MessageSquare } from "lucide-react";
+import { RefreshCw, AlertTriangle, Shield, MessageSquare, FileText, Wrench, Layers } from "lucide-react";
 
 export default function DashboardPage() {
   const { data, isLoading, isError, error, refetch, isFetching } =
@@ -149,7 +149,7 @@ export default function DashboardPage() {
       {/* AI Assistant Card */}
       <div className="mt-10">
         <h2 className="text-lg font-semibold text-white mb-4">Quick Actions</h2>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <Link href="/chat" className="group">
             <div className="relative overflow-hidden rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 to-blue-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-violet-500/40 hover:shadow-lg hover:shadow-violet-500/10">
               <div className="flex items-center gap-4">
@@ -166,6 +166,63 @@ export default function DashboardPage() {
                 </div>
               </div>
               <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-violet-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+
+          <Link href="/knowledge" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-emerald-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-blue-500/40 hover:shadow-lg hover:shadow-blue-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-600 to-emerald-500 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:shadow-blue-500/30 transition-shadow">
+                  <FileText className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-blue-300 transition-colors">
+                    Knowledge Base
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Manage files • Re-index search vectors
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-blue-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+
+          <Link href="/tools" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-orange-500/20 bg-gradient-to-br from-orange-500/10 to-amber-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-orange-500/40 hover:shadow-lg hover:shadow-orange-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-orange-600 to-amber-500 flex items-center justify-center shadow-lg shadow-orange-500/20 group-hover:shadow-orange-500/30 transition-shadow">
+                  <Wrench className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-orange-300 transition-colors">
+                    Tool Center
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    MCP Tools • Execute & Monitor
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-orange-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+
+          <Link href="/workflows" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-indigo-500/20 bg-gradient-to-br from-indigo-500/10 to-violet-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-indigo-500/40 hover:shadow-lg hover:shadow-indigo-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:shadow-indigo-500/30 transition-shadow">
+                  <Layers className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-indigo-300 transition-colors">
+                    Workflows
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    HITL Approvals • Checkpoints
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-indigo-500/5 to-transparent rounded-bl-full" />
             </div>
           </Link>
         </div>
