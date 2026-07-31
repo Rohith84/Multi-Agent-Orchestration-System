@@ -18,6 +18,7 @@ import {
   Terminal,
   Wrench,
   ShieldAlert,
+  BarChart3,
 } from "lucide-react";
 import type { UIExecutionState } from "@/hooks/use-chat";
 

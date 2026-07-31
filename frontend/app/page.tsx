@@ -17,7 +17,7 @@ import { DashboardHeader } from "@/components/dashboard-header";
 import { StatusCard, type StatusType } from "@/components/status-card";
 import { useSystemStatus } from "@/hooks/use-system-status";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, AlertTriangle, Shield, MessageSquare, FileText, Wrench, Layers } from "lucide-react";
+import { RefreshCw, AlertTriangle, Shield, MessageSquare, FileText, Wrench, Layers, BarChart3, Activity, Folder, Sparkles, Workflow } from "lucide-react";
 
 export default function DashboardPage() {
   const { data, isLoading, isError, error, refetch, isFetching } =
@@ -223,6 +223,101 @@ export default function DashboardPage() {
                 </div>
               </div>
               <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-indigo-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+
+          <Link href="/analytics" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-teal-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/20 group-hover:shadow-emerald-500/30 transition-shadow">
+                  <BarChart3 className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-emerald-300 transition-colors">
+                    Analytics & LLMOps
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Evaluations • Prompts • Exports
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-emerald-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+
+          <Link href="/operations" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 to-blue-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-cyan-600 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/20 group-hover:shadow-cyan-500/30 transition-shadow">
+                  <Activity className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-cyan-300 transition-colors">
+                    Operations & Health
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Probes • Celery • Redis Cache
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-cyan-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+
+          <Link href="/workspace" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-indigo-500/20 bg-gradient-to-br from-indigo-500/10 to-blue-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-indigo-500/40 hover:shadow-lg hover:shadow-indigo-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-indigo-600 to-blue-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:shadow-indigo-500/30 transition-shadow">
+                  <Folder className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-indigo-300 transition-colors">
+                    Workspace Studio
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    File Sandbox • Pytest • Linters
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-indigo-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+
+          <Link href="/artifacts" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 to-purple-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-violet-500/40 hover:shadow-lg hover:shadow-violet-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-violet-600 to-purple-500 flex items-center justify-center shadow-lg shadow-violet-500/20 group-hover:shadow-violet-500/30 transition-shadow">
+                  <Sparkles className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-violet-300 transition-colors">
+                    Artifact Studio
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Live UI Sandbox • Vision • Diffs
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-violet-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+
+          <Link href="/workflow-builder" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-orange-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-amber-500/40 hover:shadow-lg hover:shadow-amber-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-amber-600 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20 group-hover:shadow-amber-500/30 transition-shadow">
+                  <Workflow className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-amber-300 transition-colors">
+                    Visual Agent Builder
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Dynamic Graphs • Custom Agents
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-amber-500/5 to-transparent rounded-bl-full" />
             </div>
           </Link>
         </div>

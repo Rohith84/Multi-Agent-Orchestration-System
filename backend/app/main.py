@@ -21,6 +21,13 @@ from app.api.agents import router as agents_router
 from app.api.knowledge import router as knowledge_router
 from app.api.tools import router as tools_router
 from app.api.workflows import router as workflows_router
+from app.api.analytics import router as analytics_router
+from app.api.prompts import router as prompts_router
+from app.api.operations import router as operations_router
+from app.api.workspace import router as workspace_router
+from app.api.artifacts import router as artifacts_router
+from app.api.workflow_builder import router as workflow_builder_router
+from app.core.rate_limit import RateLimitMiddleware
 from app.services.scheduler import get_workflow_scheduler
 from app.core.config import get_settings
 from app.core.exception_handlers import register_exception_handlers
@@ -99,6 +106,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    app.add_middleware(RateLimitMiddleware)
+
     # Register exception handlers
     register_exception_handlers(app)
 
@@ -109,6 +118,12 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router)
     app.include_router(tools_router)
     app.include_router(workflows_router)
+    app.include_router(analytics_router)
+    app.include_router(prompts_router)
+    app.include_router(operations_router)
+    app.include_router(workspace_router)
+    app.include_router(artifacts_router)
+    app.include_router(workflow_builder_router)
 
     logger.info(
         "Application created: %s (model=%s)",

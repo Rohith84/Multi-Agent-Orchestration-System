@@ -1,11 +1,11 @@
 """
-LangGraph orchestration graph builder.
+LangGraph orchestration graph builder with Autonomous Self-Repair Loop.
 
 Defines the shared state and builds the state graph workflow:
-START -> Planner -> Research -> Coder -> Tester -> Reviewer -> END
+START -> Planner -> Research -> Coder -> Tester -> (Conditional Repair Loop) -> Reviewer -> END
 """
 
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, Any
 from langgraph.graph import StateGraph, START, END
 
 from app.agents.planner import PlannerAgent
@@ -34,34 +34,31 @@ class AgentState(TypedDict):
     current_agent: str
     errors: list[str]
     tool_invocations: list[dict]
+    repair_attempts: int
+    test_passed: bool
+    bug_report: dict[str, Any] | None
+    quality_gate: str
 
 
 def create_agent_graph(ollama_client: OllamaClient) -> StateGraph:
     """
-    Build and compile the LangGraph workflow.
+    Build and compile the LangGraph workflow with autonomous self-repair logic.
     """
-    # Instantiate agents with MCP tool runners
     planner = PlannerAgent(ollama_client)
     research = ResearchAgent(ollama_client)
     coder = CoderAgent(ollama_client)
     tester = TesterAgent(ollama_client)
     reviewer = ReviewerAgent(ollama_client)
 
-    # Define node functions
     async def planner_node(state: AgentState) -> dict:
         logger.info("LangGraph Node: Planner")
         tool_runner = MCPToolRunner("planner")
         output = await planner.execute(state["user_request"], tool_runner=tool_runner)
-        invocations = [
-            {"agent": r.agent_name, "tool": r.tool_name, "status": r.status,
-             "execution_time": r.execution_time, "arguments": r.arguments,
-             "result_summary": r.result_summary}
-            for r in tool_runner.get_invocations()
-        ]
         return {
             "execution_plan": output,
             "current_agent": "planner",
-            "tool_invocations": state.get("tool_invocations", []) + invocations,
+            "repair_attempts": 0,
+            "test_passed": False,
         }
 
     async def research_node(state: AgentState) -> dict:
@@ -72,63 +69,47 @@ def create_agent_graph(ollama_client: OllamaClient) -> StateGraph:
             execution_plan=state["execution_plan"],
             tool_runner=tool_runner,
         )
-        invocations = [
-            {"agent": r.agent_name, "tool": r.tool_name, "status": r.status,
-             "execution_time": r.execution_time, "arguments": r.arguments,
-             "result_summary": r.result_summary}
-            for r in tool_runner.get_invocations()
-        ]
         return {
             "research_notes": output,
             "current_agent": "research",
-            "tool_invocations": state.get("tool_invocations", []) + invocations,
         }
 
     async def coder_node(state: AgentState) -> dict:
-        logger.info("LangGraph Node: Coder")
+        logger.info("LangGraph Node: Coder (attempt %d)", state.get("repair_attempts", 0) + 1)
         tool_runner = MCPToolRunner("coder")
         output = await coder.execute(
             user_request=state["user_request"],
             execution_plan=state["execution_plan"],
             research_notes=state["research_notes"],
+            bug_report=state.get("bug_report"),
             tool_runner=tool_runner,
         )
-        invocations = [
-            {"agent": r.agent_name, "tool": r.tool_name, "status": r.status,
-             "execution_time": r.execution_time, "arguments": r.arguments,
-             "result_summary": r.result_summary}
-            for r in tool_runner.get_invocations()
-        ]
         return {
             "generated_code": output,
             "current_agent": "coder",
-            "tool_invocations": state.get("tool_invocations", []) + invocations,
         }
 
     async def tester_node(state: AgentState) -> dict:
         logger.info("LangGraph Node: Tester")
         tool_runner = MCPToolRunner("tester")
-        output = await tester.execute(
+        res = await tester.execute(
             generated_code=state["generated_code"],
             execution_plan=state["execution_plan"],
             tool_runner=tool_runner,
         )
-        invocations = [
-            {"agent": r.agent_name, "tool": r.tool_name, "status": r.status,
-             "execution_time": r.execution_time, "arguments": r.arguments,
-             "result_summary": r.result_summary}
-            for r in tool_runner.get_invocations()
-        ]
+        attempts = state.get("repair_attempts", 0) + (0 if res["passed"] else 1)
         return {
-            "test_results": output,
+            "test_results": res["output"],
+            "test_passed": res["passed"],
+            "bug_report": res.get("bug_report"),
+            "repair_attempts": attempts,
             "current_agent": "tester",
-            "tool_invocations": state.get("tool_invocations", []) + invocations,
         }
 
     async def reviewer_node(state: AgentState) -> dict:
         logger.info("LangGraph Node: Reviewer")
         tool_runner = MCPToolRunner("reviewer")
-        output = await reviewer.execute(
+        res = await reviewer.execute(
             user_request=state["user_request"],
             execution_plan=state["execution_plan"],
             generated_code=state["generated_code"],
@@ -136,35 +117,31 @@ def create_agent_graph(ollama_client: OllamaClient) -> StateGraph:
             research_notes=state["research_notes"],
             tool_runner=tool_runner,
         )
-        invocations = [
-            {"agent": r.agent_name, "tool": r.tool_name, "status": r.status,
-             "execution_time": r.execution_time, "arguments": r.arguments,
-             "result_summary": r.result_summary}
-            for r in tool_runner.get_invocations()
-        ]
         return {
-            "review": output,
+            "review": res["output"],
+            "quality_gate": res["quality_gate"],
             "current_agent": "reviewer",
-            "tool_invocations": state.get("tool_invocations", []) + invocations,
         }
 
-    # Initialize State Graph
-    builder = StateGraph(AgentState)
+    def should_repair_code(state: AgentState) -> str:
+        """Conditional routing: loop back to coder if test failed and attempts < 3."""
+        if not state.get("test_passed", True) and state.get("repair_attempts", 0) < 3:
+            logger.info("Routing back to Coder for automatic code repair (attempt %d)", state.get("repair_attempts"))
+            return "coder"
+        return "reviewer"
 
-    # Add Nodes
+    builder = StateGraph(AgentState)
     builder.add_node("planner", planner_node)
     builder.add_node("research", research_node)
     builder.add_node("coder", coder_node)
     builder.add_node("tester", tester_node)
     builder.add_node("reviewer", reviewer_node)
 
-    # Add Edges
     builder.add_edge(START, "planner")
     builder.add_edge("planner", "research")
     builder.add_edge("research", "coder")
     builder.add_edge("coder", "tester")
-    builder.add_edge("tester", "reviewer")
+    builder.add_conditional_edges("tester", should_repair_code, {"coder": "coder", "reviewer": "reviewer"})
     builder.add_edge("reviewer", END)
 
-    # Compile Graph
     return builder.compile()
