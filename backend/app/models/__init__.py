@@ -26,6 +26,26 @@ from app.models.workflow_builder import (  # noqa: F401
     CustomAgent,
     WorkflowRun,
 )
+from app.models.tenant import (  # noqa: F401
+    Organization,
+    Team,
+    User,
+    Role,
+    APIKey,
+    AuditLog,
+)
+from app.models.aiops import (  # noqa: F401
+    ModelRegistryItem,
+    ModelRoutingLog,
+    BenchmarkRun,
+    EvaluationReport,
+    FeedbackEvent,
+    QualityScoreItem,
+    DriftReportItem,
+    OptimizationRecommendation,
+)
+
+
 
 
 

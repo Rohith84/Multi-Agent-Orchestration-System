@@ -17,7 +17,7 @@ import { DashboardHeader } from "@/components/dashboard-header";
 import { StatusCard, type StatusType } from "@/components/status-card";
 import { useSystemStatus } from "@/hooks/use-system-status";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, AlertTriangle, Shield, MessageSquare, FileText, Wrench, Layers, BarChart3, Activity, Folder, Sparkles, Workflow } from "lucide-react";
+import { RefreshCw, AlertTriangle, Shield, MessageSquare, FileText, Wrench, Layers, BarChart3, Activity, Folder, Sparkles, Workflow, ShieldCheck, Cpu } from "lucide-react";
 
 export default function DashboardPage() {
   const { data, isLoading, isError, error, refetch, isFetching } =
@@ -320,6 +320,45 @@ export default function DashboardPage() {
               <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-amber-500/5 to-transparent rounded-bl-full" />
             </div>
           </Link>
+
+          <Link href="/governance" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-teal-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/20 group-hover:shadow-emerald-500/30 transition-shadow">
+                  <ShieldCheck className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-emerald-300 transition-colors">
+                    Security & Governance
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    RBAC • API Keys • DLP & Audit
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-emerald-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+
+          <Link href="/aiops" className="group">
+            <div className="relative overflow-hidden rounded-xl border border-indigo-500/20 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 p-6 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-indigo-500/40 hover:shadow-lg hover:shadow-indigo-500/10">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 group-hover:shadow-indigo-500/30 transition-shadow">
+                  <Cpu className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white group-hover:text-indigo-300 transition-colors">
+                    AIOps Platform
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Model Router • Evals • Drift & Optimization
+                  </p>
+                </div>
+              </div>
+              <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-indigo-500/5 to-transparent rounded-bl-full" />
+            </div>
+          </Link>
+
         </div>
       </div>
 

@@ -32,5 +32,11 @@ celery==5.4.0
 redis==5.2.1
 psutil==7.0.0
 
+# Security & Auth
+python-jose[cryptography]==3.4.0
+passlib[bcrypt]==1.7.4
+email-validator==2.2.0
+python-multipart==0.0.32
+
 # Linting & Formatting
 ruff==0.11.13

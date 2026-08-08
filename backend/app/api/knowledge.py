@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.core.logging import get_logger
 from app.services.knowledge_service import KnowledgeService
-from app.loader import UnsupportedFileTypeError # type: ignore # import placeholder just in case, but we use the custom exception from loader module below
 
 from app.knowledge.loader import UnsupportedFileTypeError
 

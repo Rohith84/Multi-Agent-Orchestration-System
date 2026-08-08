@@ -21,7 +21,6 @@ from app.repositories.chat_repository import ChatRepository
 from app.repositories.tool_repository import ToolExecutionRepository
 from app.repositories.workflow_repository import WorkflowRepository
 from app.knowledge.vectorstore.planning_memory import PlanningMemoryStore
-from app.services.evaluator import EvaluationService
 from app.services.workspace_service import WorkspaceService
 from app.models.metrics import AgentMetric, WorkflowMetric
 from app.models.workspace import TestReport, QualityReport
@@ -59,7 +58,6 @@ class WorkflowExecutor:
         self.tool_repo = ToolExecutionRepository(db)
         self.wf_repo = WorkflowRepository(db)
         self.planning_memory_store = PlanningMemoryStore()
-        self.evaluator = EvaluationService()
         self.ollama = OllamaClient()
         self.settings = get_settings()
 

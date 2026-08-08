@@ -27,6 +27,9 @@ from app.api.operations import router as operations_router
 from app.api.workspace import router as workspace_router
 from app.api.artifacts import router as artifacts_router
 from app.api.workflow_builder import router as workflow_builder_router
+from app.api.auth import router as auth_router
+from app.api.tenants import router as tenants_router
+from app.api.aiops import router as aiops_router
 from app.core.rate_limit import RateLimitMiddleware
 from app.services.scheduler import get_workflow_scheduler
 from app.core.config import get_settings
@@ -124,6 +127,9 @@ def create_app() -> FastAPI:
     app.include_router(workspace_router)
     app.include_router(artifacts_router)
     app.include_router(workflow_builder_router)
+    app.include_router(auth_router)
+    app.include_router(tenants_router)
+    app.include_router(aiops_router)
 
     logger.info(
         "Application created: %s (model=%s)",
