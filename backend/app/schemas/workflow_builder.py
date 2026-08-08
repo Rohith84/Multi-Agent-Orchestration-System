@@ -7,7 +7,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from uuid import UUID
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _stringify_uuid(v: Any) -> Any:
+    if isinstance(v, UUID):
+        return str(v)
+    return v
 
 
 class GraphNodeSchema(BaseModel):
@@ -49,6 +56,11 @@ class WorkflowTemplateSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("id", mode="before")
+    @classmethod
+    def convert_uuid(cls, v: Any) -> Any:
+        return _stringify_uuid(v)
+
 
 class CustomAgentSchema(BaseModel):
     """Schema for a user-defined custom agent."""
@@ -58,6 +70,13 @@ class CustomAgentSchema(BaseModel):
     description: str
     system_prompt: str
     user_prompt_template: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def convert_uuid(cls, v: Any) -> Any:
+        return _stringify_uuid(v)
     llm_model: str
     temperature: float
     retry_count: int

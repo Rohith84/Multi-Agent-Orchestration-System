@@ -14,17 +14,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Multi Agent Orchestration System — AI Assistant",
+  title: "MultiAgent OS — AI Operating System for Complex Work",
   description:
-    "AI-powered assistant with chat interface. Built with Next.js, FastAPI, and Ollama for intelligent code generation, debugging, and exploration.",
+    "Enterprise multi-agent orchestration platform. Deploy teams of specialized AI agents for planning, research, coding, testing, and review.",
   keywords: [
     "multi-agent",
     "AI",
-    "assistant",
-    "chat",
     "orchestration",
-    "Ollama",
-    "FastAPI",
+    "workflow",
+    "automation",
+    "enterprise",
+    "LLM",
   ],
 };
 
@@ -36,9 +36,10 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col bg-zinc-950 text-zinc-100">
+      <body className="min-h-full flex flex-col">
         <Providers>{children}</Providers>
       </body>
     </html>

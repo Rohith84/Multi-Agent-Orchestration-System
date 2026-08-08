@@ -1,7 +1,7 @@
 /**
- * React Query provider wrapper.
+ * React Query + Theme provider wrapper.
  *
- * Must be a client component since QueryClientProvider uses React context.
+ * Must be a client component since providers use React context.
  * Separated from layout.tsx to keep the layout as a server component.
  */
 
@@ -9,24 +9,20 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
+import { ThemeProvider } from "@/components/theme-provider";
 
 interface ProvidersProps {
   children: ReactNode;
 }
 
 export function Providers({ children }: ProvidersProps) {
-  // Create QueryClient inside state to prevent re-creation on every render
-  // and to avoid sharing state between server/client
   const [queryClient] = useState(
     () =>
       new QueryClient({
         defaultOptions: {
           queries: {
-            // Don't refetch on window focus in development
             refetchOnWindowFocus: process.env.NODE_ENV === "production",
-            // Retry once on failure
             retry: 1,
-            // Data is considered fresh for 5 seconds
             staleTime: 5000,
           },
         },
@@ -34,6 +30,8 @@ export function Providers({ children }: ProvidersProps) {
   );
 
   return (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>{children}</ThemeProvider>
+    </QueryClientProvider>
   );
 }

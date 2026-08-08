@@ -37,6 +37,16 @@ class WorkflowScheduleRequest(BaseModel):
     require_approval_agents: list[str] = Field(default_factory=list, description="Agent approval requirements.")
 
 
+from uuid import UUID
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _stringify_uuid(v: Any) -> Any:
+    if isinstance(v, UUID):
+        return str(v)
+    return v
+
+
 class WorkflowCheckpointSchema(BaseModel):
     """Schema representing a single workflow checkpoint snapshot."""
 
@@ -51,6 +61,11 @@ class WorkflowCheckpointSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("id", "workflow_id", mode="before")
+    @classmethod
+    def convert_uuid(cls, v: Any) -> Any:
+        return _stringify_uuid(v)
+
 
 class WorkflowApprovalSchema(BaseModel):
     """Schema representing a human approval gate request."""
@@ -64,6 +79,11 @@ class WorkflowApprovalSchema(BaseModel):
     decided_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("id", "workflow_id", mode="before")
+    @classmethod
+    def convert_uuid(cls, v: Any) -> Any:
+        return _stringify_uuid(v)
 
 
 class WorkflowSchema(BaseModel):
@@ -84,6 +104,11 @@ class WorkflowSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("id", "session_id", mode="before")
+    @classmethod
+    def convert_uuid(cls, v: Any) -> Any:
+        return _stringify_uuid(v)
+
 
 class WorkflowDetailSchema(WorkflowSchema):
     """Detailed workflow view containing history, checkpoints, and approvals."""
@@ -102,7 +127,7 @@ class WorkflowListResponse(BaseModel):
 class WorkflowScheduleSchema(BaseModel):
     """Schema for a workflow schedule rule."""
 
-    id: str
+    id: UUID | str
     title: str
     user_request: str
     cron_expression: str
