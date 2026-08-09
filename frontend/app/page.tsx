@@ -327,7 +327,7 @@ export default function LandingPage() {
               >
                 One Intelligence Layer.
                 <br />
-                <span style={{ color: "var(--accent-primary)" }}>
+                <span style={{ color: "var(--accent-text)" }}>
                   Five Specialized Agents.
                 </span>
                 <br />
@@ -499,34 +499,34 @@ export default function LandingPage() {
             <div className="brutalist-card p-8 landing-glow-accent">
               <h3
                 className="text-h4 mb-6"
-                style={{ color: "var(--accent-primary)" }}
+                style={{ color: "var(--accent-text)" }}
               >
                 MULTIAGENT OS
               </h3>
               <div className="space-y-3 text-center">
                 {[
-                  { label: "User", color: "var(--fg-primary)" },
-                  { label: "Orchestrator", color: "var(--accent-primary)" },
-                  { label: "Planner", color: "var(--agent-planner)" },
+                  { label: "User", color: "var(--fg-primary)", bg: "var(--bg-surface)", fg: "var(--fg-primary)" },
+                  { label: "Orchestrator", color: "var(--border-primary)", bg: "var(--accent-primary)", fg: "#111111" },
+                  { label: "Planner", color: "var(--border-primary)", bg: "var(--agent-planner)", fg: "#111111" },
                   {
                     label: "Research / Coding / Testing",
                     color: "var(--agent-researcher)",
+                    bg: "var(--bg-surface)",
+                    fg: "var(--agent-researcher)",
                   },
-                  { label: "Reviewer", color: "var(--agent-reviewer)" },
-                  { label: "Final Result", color: "var(--accent-success)" },
+                  { label: "Reviewer", color: "var(--agent-reviewer)", bg: "var(--bg-surface)", fg: "var(--agent-reviewer)" },
+                  { label: "Final Result", color: "var(--accent-success)", bg: "var(--accent-success)", fg: "#111111" },
                 ].map((step, i, arr) => (
                   <div key={step.label}>
                     <div
-                      className="inline-block px-5 py-2.5 border-2"
+                      className="inline-block px-5 py-2.5 border-2 font-extrabold"
                       style={{
                         borderColor: step.color,
-                        background: "var(--bg-surface)",
+                        background: step.bg,
+                        color: step.fg,
                       }}
                     >
-                      <span
-                        className="text-caption font-bold"
-                        style={{ color: step.color }}
-                      >
+                      <span className="text-caption font-extrabold tracking-wide">
                         {step.label}
                       </span>
                     </div>

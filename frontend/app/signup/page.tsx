@@ -347,7 +347,7 @@ export default function SignupPage() {
               <Link
                 href="/login"
                 className="text-body-sm font-bold uppercase tracking-wide"
-                style={{ color: "var(--accent-primary)" }}
+                style={{ color: "var(--accent-text)" }}
               >
                 Sign in →
               </Link>

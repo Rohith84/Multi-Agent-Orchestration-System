@@ -135,7 +135,7 @@ export default function LoginPage() {
           >
             Multi-Agent
             <br />
-            <span style={{ color: "var(--accent-primary)" }}>
+            <span style={{ color: "var(--accent-text)" }}>
               Intelligence.
             </span>
           </h1>
@@ -351,7 +351,7 @@ export default function LoginPage() {
               <Link
                 href="/signup"
                 className="text-body-sm font-bold uppercase tracking-wide"
-                style={{ color: "var(--accent-primary)" }}
+                style={{ color: "var(--accent-text)" }}
               >
                 Create account →
               </Link>

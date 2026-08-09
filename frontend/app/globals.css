@@ -80,6 +80,7 @@
 
   /* Accents */
   --accent-primary:      #DFFF00;
+  --accent-text:         #5B6B00;
   --accent-secondary:    #7C3AED;
   --accent-tertiary:     #06B6D4;
   --accent-success:      #22C55E;
@@ -94,6 +95,7 @@
 
   /* Agent Colors */
   --agent-planner:       #DFFF00;
+  --agent-planner-text:  #5B6B00;
   --agent-researcher:    #06B6D4;
   --agent-coder:         #7C3AED;
   --agent-tester:        #F59E0B;
@@ -121,6 +123,7 @@
   --border-subtle:       #1A1A1A;
 
   --accent-primary:      #DFFF00;
+  --accent-text:         #DFFF00;
   --accent-secondary:    #8B5CF6;
   --accent-tertiary:     #22D3EE;
   --accent-success:      #4ADE80;
@@ -133,6 +136,7 @@
   --shadow-soft:         0px 1px 3px rgba(0,0,0,0.4);
 
   --agent-planner:       #DFFF00;
+  --agent-planner-text:  #DFFF00;
   --agent-researcher:    #22D3EE;
   --agent-coder:         #8B5CF6;
   --agent-tester:        #FBBF24;
