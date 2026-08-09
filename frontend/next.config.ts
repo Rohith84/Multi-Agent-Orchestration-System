@@ -42,6 +42,16 @@ const nextConfig: NextConfig = {
         source: "/analytics",
         destination: "/app/analytics",
         permanent: true,
+      },
+      {
+        source: "/operations",
+        destination: "/app/operations",
+        permanent: true,
+      },
+      {
+        source: "/governance",
+        destination: "/app/governance",
+        permanent: true,
       }
     ];
   },

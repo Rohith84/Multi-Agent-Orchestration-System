@@ -102,15 +102,17 @@ export function AppTopbar({ onOpenMobileMenu }: AppTopbarProps) {
         {/* Theme Cycle Button */}
         <button
           onClick={cycleTheme}
+          type="button"
           className="w-8 h-8 flex items-center justify-center border-2 border-[var(--border-primary)] transition-transform hover:translate-x-[-1px] hover:translate-y-[-1px]"
           style={{
             background: "var(--bg-surface)",
             boxShadow: "var(--shadow-brutalist-sm)",
             color: "var(--fg-primary)",
           }}
-          aria-label={`Current theme: ${theme}. Click to cycle.`}
+          aria-label="Toggle theme"
         >
-          <ThemeIcon className="w-3.5 h-3.5" />
+          <Sun className="w-3.5 h-3.5 dark:hidden" aria-hidden="true" />
+          <Moon className="w-3.5 h-3.5 hidden dark:inline" aria-hidden="true" />
         </button>
       </div>
     </header>

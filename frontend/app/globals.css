@@ -421,3 +421,155 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--fg-tertiary);
 }
+
+/* ── Public Landing Page Utilities ── */
+
+/* Section reveal animation */
+@keyframes section-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.section-reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+}
+
+.section-reveal.in-view {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Staggered child animations */
+.stagger-children.in-view > * {
+  animation: section-reveal 0.5s ease-out both;
+}
+
+.stagger-children.in-view > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children.in-view > *:nth-child(2) { animation-delay: 80ms; }
+.stagger-children.in-view > *:nth-child(3) { animation-delay: 160ms; }
+.stagger-children.in-view > *:nth-child(4) { animation-delay: 240ms; }
+.stagger-children.in-view > *:nth-child(5) { animation-delay: 320ms; }
+.stagger-children.in-view > *:nth-child(6) { animation-delay: 400ms; }
+.stagger-children.in-view > *:nth-child(7) { animation-delay: 480ms; }
+.stagger-children.in-view > *:nth-child(8) { animation-delay: 560ms; }
+.stagger-children.in-view > *:nth-child(9) { animation-delay: 640ms; }
+.stagger-children.in-view > *:nth-child(10) { animation-delay: 720ms; }
+
+/* Flow step animation */
+@keyframes flow-step-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Pipeline connector pulse */
+@keyframes connector-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.connector-pulse {
+  animation: connector-pulse 2s ease-in-out infinite;
+}
+
+/* Subtle glow for dark mode landing sections */
+.dark .landing-glow-accent {
+  box-shadow: 0 0 30px rgba(223, 255, 0, 0.08), 0 0 60px rgba(223, 255, 0, 0.04);
+}
+
+.dark .landing-glow-purple {
+  box-shadow: 0 0 30px rgba(139, 92, 246, 0.08), 0 0 60px rgba(139, 92, 246, 0.04);
+}
+
+.dark .landing-glow-cyan {
+  box-shadow: 0 0 30px rgba(34, 211, 238, 0.08);
+}
+
+/* ── Form Input Styles (Login/Signup) ── */
+.form-input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 2px solid var(--border-primary);
+  background: var(--bg-surface);
+  color: var(--fg-primary);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+  outline: none;
+}
+
+.form-input::placeholder {
+  color: var(--fg-tertiary);
+}
+
+.form-input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+
+.form-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.form-input-error {
+  border-color: var(--accent-error);
+}
+
+.form-input-error:focus {
+  box-shadow: 0 0 0 1px var(--accent-error);
+}
+
+.form-label {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-secondary);
+  margin-bottom: 6px;
+}
+
+/* ── Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up,
+  .animate-fade-in,
+  .animate-slide-in-right,
+  .section-reveal,
+  .stagger-children > * {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .section-reveal.in-view {
+    opacity: 1;
+    transform: none;
+  }
+
+  .status-dot-online,
+  .status-dot-warning,
+  .connector-pulse {
+    animation: none !important;
+  }
+
+  .brutalist-card:hover,
+  .brutalist-btn:hover,
+  .brutalist-btn:active {
+    transform: none !important;
+  }
+}
