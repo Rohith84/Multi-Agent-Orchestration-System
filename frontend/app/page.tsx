@@ -474,7 +474,7 @@ export default function DashboardPage() {
           <p className="text-body max-w-xl mx-auto mb-8" style={{ color: "rgba(17,17,17,0.7)" }}>
             Deploy your first multi-agent workflow and experience the power of collaborative AI.
           </p>
-          <Link href="/chat" className="brutalist-btn brutalist-btn-dark">
+          <Link href="/app/chat" className="brutalist-btn brutalist-btn-dark">
             <Zap className="w-4 h-4" />
             Launch AI Assistant
             <ArrowRight className="w-4 h-4" />

@@ -93,7 +93,7 @@ export function AppNavbar() {
 
             {/* Get Started CTA (desktop) */}
             <Link
-              href="/chat"
+              href="/app/chat"
               className="hidden sm:inline-flex brutalist-btn brutalist-btn-primary text-[11px] py-1.5 px-4"
             >
               Get Started
@@ -139,7 +139,7 @@ export function AppNavbar() {
             })}
             <div className="pt-3 border-t border-[var(--border-secondary)]">
               <Link
-                href="/chat"
+                href="/app/chat"
                 onClick={() => setMobileOpen(false)}
                 className="brutalist-btn brutalist-btn-primary w-full text-center text-xs"
               >
