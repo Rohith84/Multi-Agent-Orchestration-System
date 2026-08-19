@@ -7,9 +7,11 @@
 
 "use client";
 
-import { Bot, Plus, Trash2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Bot, Plus, Trash2, Cpu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import api from "@/lib/api";
 
 interface ChatHeaderProps {
   sessionId: string | null;
@@ -22,25 +24,79 @@ export function ChatHeader({
   onNewChat,
   onClearChat,
 }: ChatHeaderProps) {
+  const [ollamaProcessor, setOllamaProcessor] = useState<string>("checking...");
+
+  useEffect(() => {
+    let active = true;
+    const checkRuntime = async () => {
+      try {
+        const { data } = await api.get("/api/ollama/runtime");
+        if (active) {
+          setOllamaProcessor(data.processor || "unknown");
+        }
+      } catch {
+        if (active) setOllamaProcessor("unknown");
+      }
+    };
+    checkRuntime();
+    const interval = setInterval(checkRuntime, 10000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
   return (
-    <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur-md">
+    <div
+      className="flex items-center justify-between px-6 py-4 border-b transition-colors"
+      style={{
+        background: "var(--bg-surface)",
+        borderColor: "var(--border-secondary)",
+      }}
+    >
       <div className="flex items-center gap-3">
         {/* AI icon */}
-        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-violet-600 to-blue-500 flex items-center justify-center shadow-lg shadow-violet-500/20">
-          <Bot className="h-5 w-5 text-white" />
+        <div
+          className="h-10 w-10 border-2 border-[var(--border-primary)] flex items-center justify-center shadow-[var(--shadow-brutalist-sm)]"
+          style={{ background: "var(--accent-secondary)", color: "#FFFFFF" }}
+        >
+          <Bot className="h-5 w-5" />
         </div>
 
         <div>
-          <h1 className="text-lg font-semibold text-white">AI Assistant</h1>
+          <h1
+            className="text-lg font-black tracking-tight"
+            style={{ color: "var(--fg-primary)" }}
+          >
+            AI Assistant
+          </h1>
           <div className="flex items-center gap-2 mt-0.5">
             <Badge
               variant="outline"
-              className="text-[10px] px-1.5 py-0 border-violet-500/30 text-violet-400"
+              className="text-[10px] px-1.5 py-0 border font-mono font-bold"
+              style={{
+                borderColor: "var(--border-primary)",
+                background: "var(--bg-secondary)",
+                color: "var(--fg-primary)",
+              }}
             >
               Multi-Agent Graph
             </Badge>
+            <Badge
+              variant="outline"
+              className="text-[10px] px-1.5 py-0 border font-mono font-bold flex items-center gap-1"
+              style={{
+                borderColor: "var(--border-primary)",
+                background: ollamaProcessor.includes("GPU") ? "var(--accent-lime, #a3e635)" : "var(--bg-secondary)",
+                color: ollamaProcessor.includes("GPU") ? "#000000" : "var(--fg-primary)",
+              }}
+            >
+              <Cpu className="h-3 w-3" /> Ollama: {ollamaProcessor.toUpperCase()}
+            </Badge>
             {sessionId && (
-              <span className="text-[10px] text-zinc-600 font-mono">
+              <span
+                className="text-[10px] font-mono font-bold"
+                style={{ color: "var(--fg-tertiary)" }}
+              >
                 {sessionId.slice(0, 8)}…
               </span>
             )}
@@ -54,9 +110,9 @@ export function ChatHeader({
           variant="outline"
           size="sm"
           onClick={onNewChat}
-          className="border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 hover:border-zinc-600 transition-all"
+          className="brutalist-btn brutalist-btn-secondary text-xs"
         >
-          <Plus className="h-4 w-4 mr-1.5" />
+          <Plus className="h-4 w-4 mr-1" />
           New Chat
         </Button>
 
@@ -66,9 +122,14 @@ export function ChatHeader({
             variant="outline"
             size="sm"
             onClick={onClearChat}
-            className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/50 transition-all"
+            className="text-xs font-bold border-2 transition-all"
+            style={{
+              borderColor: "var(--accent-error)",
+              color: "var(--accent-error)",
+              background: "var(--bg-surface)",
+            }}
           >
-            <Trash2 className="h-4 w-4 mr-1.5" />
+            <Trash2 className="h-4 w-4 mr-1" />
             Clear
           </Button>
         )}

@@ -160,6 +160,11 @@ class WorkflowRepository:
         )
         return list(result.scalars().all())
 
+    async def clear_execution_state(self, workflow_id: uuid.UUID) -> None:
+        """Remove checkpoints and approval decisions before an explicit restart."""
+        await self.db.execute(delete(WorkflowCheckpoint).where(WorkflowCheckpoint.workflow_id == workflow_id))
+        await self.db.execute(delete(WorkflowApproval).where(WorkflowApproval.workflow_id == workflow_id))
+
     # --- Approvals ---
 
     async def create_approval(

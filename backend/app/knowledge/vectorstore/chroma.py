@@ -4,7 +4,11 @@ ChromaDB vector store adapter.
 
 import uuid
 from typing import Any, TypedDict
-import chromadb
+try:
+    import chromadb
+except ImportError:
+    chromadb = None
+
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
@@ -36,8 +40,10 @@ class ChromaStore:
         self._client = None
         self._collection = None
 
-    def _get_client(self) -> chromadb.PersistentClient:
+    def _get_client(self) -> Any:
         """Lazy initialization of Chroma persistent client."""
+        if chromadb is None:
+            raise VectorDBUnavailableError("ChromaDB is not installed in environment.")
         if self._client is None:
             try:
                 logger.info("Initializing ChromaDB PersistentClient at path=%s", self.path)

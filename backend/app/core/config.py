@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     embedding_model: str = "nomic-embed-text"
 
     # AI Assistant
+    model_explain: str = ""
+    ask_system_prompt: str = (
+        "You are a helpful AI assistant. Answer the user's actual question directly, accurately, and concisely. "
+        "Do not propose code, files, terminal commands, test suites, or execution plans unless the user explicitly requests code or technical step-by-step instructions. "
+        "If you are unsure or lack context, clearly state your uncertainty."
+    )
     system_prompt: str = (
         "You are a helpful AI assistant integrated into the Multi Agent Orchestration System. "
         "You provide clear, accurate, and well-structured responses. "

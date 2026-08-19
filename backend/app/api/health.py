@@ -82,8 +82,15 @@ async def system_status(
         status="connected",
         message="FastAPI is running",
     )
-    database_status = await _check_database(db)
-    ollama_status = await _check_ollama(settings.ollama_base_url)
+    try:
+        database_status = await _check_database(db)
+    except Exception as e:
+        database_status = SubsystemStatus(name="database", status="disconnected", message=str(e)[:100])
+
+    try:
+        ollama_status = await _check_ollama(settings.ollama_base_url)
+    except Exception as e:
+        ollama_status = SubsystemStatus(name="ollama", status="disconnected", message=str(e)[:100])
 
     system_ready = (
         backend_status.status == "connected"
@@ -135,3 +142,11 @@ async def _check_ollama(base_url: str) -> SubsystemStatus:
             status="disconnected",
             message="Ollama is not reachable",
         )
+
+
+@router.get("/ollama/runtime")
+async def get_ollama_runtime_diagnostics() -> dict[str, Any]:
+    """Returns real-time Ollama GPU/CPU runtime process status."""
+    from app.ai.ollama_client import OllamaClient
+    client = OllamaClient()
+    return await client.get_runtime_status()

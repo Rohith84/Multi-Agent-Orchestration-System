@@ -62,6 +62,10 @@ class OllamaClient:
             "model": model,
             "messages": messages,
             "stream": False,
+            "options": {
+                "num_predict": 512,
+                "temperature": 0.2,
+            },
         }
 
         logger.info(
@@ -123,3 +127,72 @@ class OllamaClient:
                 )
         except Exception:
             return False
+
+    async def get_runtime_status(self) -> dict[str, Any]:
+        """
+        Query Ollama's local /api/ps endpoint to inspect loaded process model, size, VRAM, and processor type.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                response = await client.get(f"{self.base_url}/api/ps")
+                if response.status_code != 200:
+                    return {
+                        "status": "unavailable",
+                        "loaded_models": [],
+                        "processor": "unknown",
+                        "vram_mb": 0,
+                    }
+
+                data = response.json()
+                models = data.get("models", [])
+                if not models:
+                    return {
+                        "status": "idle",
+                        "loaded_models": [],
+                        "processor": "idle",
+                        "vram_mb": 0,
+                    }
+
+                loaded_info = []
+                total_vram_bytes = 0
+                processor_types = set()
+
+                for m in models:
+                    name = m.get("name", "unknown")
+                    size = m.get("size", 0)
+                    vram = m.get("size_vram", 0)
+                    total_vram_bytes += vram
+
+                    if vram == 0:
+                        proc = "CPU"
+                    elif size > 0 and vram >= size * 0.95:
+                        proc = "GPU"
+                    elif vram > 0:
+                        proc = "CPU/GPU"
+                    else:
+                        proc = "unknown"
+
+                    processor_types.add(proc)
+                    loaded_info.append({
+                        "name": name,
+                        "size_mb": round(size / (1024 * 1024), 2),
+                        "vram_mb": round(vram / (1024 * 1024), 2),
+                        "processor": proc,
+                    })
+
+                primary_processor = "/".join(sorted(processor_types)) if processor_types else "unknown"
+
+                return {
+                    "status": "running",
+                    "loaded_models": loaded_info,
+                    "processor": primary_processor,
+                    "vram_mb": round(total_vram_bytes / (1024 * 1024), 2),
+                }
+        except Exception as e:
+            logger.warning("Failed querying Ollama /api/ps: %s", e)
+            return {
+                "status": "unknown",
+                "loaded_models": [],
+                "processor": "unknown",
+                "vram_mb": 0,
+            }

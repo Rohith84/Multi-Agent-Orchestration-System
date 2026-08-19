@@ -48,7 +48,11 @@ async def run_agent_workflow(
     executor = WorkflowExecutor(db)
 
     return StreamingResponse(
-        executor.execute(request.message, session_id),
+        executor.execute(
+            user_request=request.message,
+            session_id=session_id,
+            require_approval_agents=request.require_approval_agents,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

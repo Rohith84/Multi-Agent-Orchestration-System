@@ -5,7 +5,8 @@ Defines the shared state and builds the state graph workflow:
 START -> Planner -> Research -> Coder -> Tester -> (Conditional Repair Loop) -> Reviewer -> END
 """
 
-from typing import TypedDict, Annotated, Any
+from typing import TypedDict, Any
+import time
 from langgraph.graph import StateGraph, START, END
 
 from app.agents.planner import PlannerAgent
@@ -38,9 +39,15 @@ class AgentState(TypedDict):
     test_passed: bool
     bug_report: dict[str, Any] | None
     quality_gate: str
+    next_agent: str
+    execution_time: float
 
 
-def create_agent_graph(ollama_client: OllamaClient) -> StateGraph:
+def create_agent_graph(
+    ollama_client: OllamaClient,
+    workspace_service: Any | None = None,
+    start_at: str = "planner",
+) -> StateGraph:
     """
     Build and compile the LangGraph workflow with autonomous self-repair logic.
     """
@@ -52,6 +59,7 @@ def create_agent_graph(ollama_client: OllamaClient) -> StateGraph:
 
     async def planner_node(state: AgentState) -> dict:
         logger.info("LangGraph Node: Planner")
+        started = time.perf_counter()
         tool_runner = MCPToolRunner("planner")
         output = await planner.execute(state["user_request"], tool_runner=tool_runner)
         return {
@@ -59,10 +67,12 @@ def create_agent_graph(ollama_client: OllamaClient) -> StateGraph:
             "current_agent": "planner",
             "repair_attempts": 0,
             "test_passed": False,
+            "execution_time": round(time.perf_counter() - started, 3),
         }
 
     async def research_node(state: AgentState) -> dict:
         logger.info("LangGraph Node: Research")
+        started = time.perf_counter()
         tool_runner = MCPToolRunner("research")
         output = await research.execute(
             user_request=state["user_request"],
@@ -72,29 +82,35 @@ def create_agent_graph(ollama_client: OllamaClient) -> StateGraph:
         return {
             "research_notes": output,
             "current_agent": "research",
+            "execution_time": round(time.perf_counter() - started, 3),
         }
 
     async def coder_node(state: AgentState) -> dict:
         logger.info("LangGraph Node: Coder (attempt %d)", state.get("repair_attempts", 0) + 1)
+        started = time.perf_counter()
         tool_runner = MCPToolRunner("coder")
         output = await coder.execute(
             user_request=state["user_request"],
             execution_plan=state["execution_plan"],
             research_notes=state["research_notes"],
             bug_report=state.get("bug_report"),
+            workspace_service=workspace_service,
             tool_runner=tool_runner,
         )
         return {
             "generated_code": output,
             "current_agent": "coder",
+            "execution_time": round(time.perf_counter() - started, 3),
         }
 
     async def tester_node(state: AgentState) -> dict:
         logger.info("LangGraph Node: Tester")
+        started = time.perf_counter()
         tool_runner = MCPToolRunner("tester")
         res = await tester.execute(
             generated_code=state["generated_code"],
             execution_plan=state["execution_plan"],
+            workspace_service=workspace_service,
             tool_runner=tool_runner,
         )
         attempts = state.get("repair_attempts", 0) + (0 if res["passed"] else 1)
@@ -104,10 +120,12 @@ def create_agent_graph(ollama_client: OllamaClient) -> StateGraph:
             "bug_report": res.get("bug_report"),
             "repair_attempts": attempts,
             "current_agent": "tester",
+            "execution_time": round(time.perf_counter() - started, 3),
         }
 
     async def reviewer_node(state: AgentState) -> dict:
         logger.info("LangGraph Node: Reviewer")
+        started = time.perf_counter()
         tool_runner = MCPToolRunner("reviewer")
         res = await reviewer.execute(
             user_request=state["user_request"],
@@ -121,6 +139,7 @@ def create_agent_graph(ollama_client: OllamaClient) -> StateGraph:
             "review": res["output"],
             "quality_gate": res["quality_gate"],
             "current_agent": "reviewer",
+            "execution_time": round(time.perf_counter() - started, 3),
         }
 
     def should_repair_code(state: AgentState) -> str:
@@ -137,11 +156,19 @@ def create_agent_graph(ollama_client: OllamaClient) -> StateGraph:
     builder.add_node("tester", tester_node)
     builder.add_node("reviewer", reviewer_node)
 
-    builder.add_edge(START, "planner")
-    builder.add_edge("planner", "research")
-    builder.add_edge("research", "coder")
-    builder.add_edge("coder", "tester")
-    builder.add_conditional_edges("tester", should_repair_code, {"coder": "coder", "reviewer": "reviewer"})
+    valid_starts = {"planner", "research", "coder", "tester", "reviewer"}
+    if start_at not in valid_starts:
+        raise ValueError(f"Unknown workflow resume agent: {start_at}")
+
+    builder.add_edge(START, start_at)
+    if start_at == "planner":
+        builder.add_edge("planner", "research")
+    if start_at in {"planner", "research"}:
+        builder.add_edge("research", "coder")
+    if start_at != "reviewer":
+        builder.add_edge("coder", "tester")
+    if start_at in {"planner", "research", "coder", "tester"}:
+        builder.add_conditional_edges("tester", should_repair_code, {"coder": "coder", "reviewer": "reviewer"})
     builder.add_edge("reviewer", END)
 
     return builder.compile()

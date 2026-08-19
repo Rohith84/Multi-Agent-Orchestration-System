@@ -457,13 +457,10 @@ export default function LandingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
             {/* Traditional AI */}
-            <div
-              className="brutalist-card p-8"
-              style={{ opacity: 0.7 }}
-            >
+            <div className="brutalist-card p-8 border-2 border-[var(--border-primary)]">
               <h3
-                className="text-h4 mb-6"
-                style={{ color: "var(--fg-tertiary)" }}
+                className="text-h4 font-black mb-6"
+                style={{ color: "var(--fg-primary)" }}
               >
                 TRADITIONAL AI
               </h3>
@@ -471,13 +468,14 @@ export default function LandingPage() {
                 {["User", "Single Model", "Response"].map((step, i) => (
                   <div key={step}>
                     <div
-                      className="inline-block px-6 py-3 border-2 border-[var(--border-secondary)]"
-                      style={{ background: "var(--bg-secondary)" }}
+                      className="inline-block px-6 py-3 border-2 font-extrabold shadow-[var(--shadow-brutalist-sm)]"
+                      style={{
+                        borderColor: i === 1 ? "var(--accent-error)" : "var(--border-primary)",
+                        background: i === 1 ? "var(--bg-surface)" : "var(--bg-secondary)",
+                        color: "var(--fg-primary)",
+                      }}
                     >
-                      <span
-                        className="text-caption font-bold"
-                        style={{ color: "var(--fg-tertiary)" }}
-                      >
+                      <span className="text-caption font-extrabold tracking-wide">
                         {step}
                       </span>
                     </div>
@@ -485,7 +483,7 @@ export default function LandingPage() {
                       <div className="flex justify-center my-2">
                         <ArrowDown
                           className="w-4 h-4"
-                          style={{ color: "var(--fg-tertiary)" }}
+                          style={{ color: "var(--fg-primary)" }}
                           aria-hidden="true"
                         />
                       </div>
@@ -833,42 +831,43 @@ export default function LandingPage() {
 
             {/* Visual preview */}
             <div className="brutalist-card p-6 landing-glow-purple">
-              <div className="space-y-3 text-center">
+              <div className="space-y-2.5 text-center flex flex-col items-center">
                 {[
-                  { label: "TRIGGER", color: "var(--accent-primary)" },
-                  { label: "PLANNER", color: "var(--agent-planner)" },
-                  { label: "RESEARCH", color: "var(--agent-researcher)" },
-                  { label: "CODE", color: "var(--agent-coder)" },
-                  { label: "TEST", color: "var(--agent-tester)" },
-                  { label: "REVIEW", color: "var(--agent-reviewer)" },
-                  { label: "OUTPUT", color: "var(--accent-success)" },
-                ].map((step, i, arr) => (
-                  <div key={step.label}>
-                    <div
-                      className="inline-block px-6 py-2 border-2"
-                      style={{
-                        borderColor: step.color,
-                        background: "var(--bg-surface)",
-                      }}
-                    >
-                      <span
-                        className="text-caption font-bold"
-                        style={{ color: step.color }}
+                  { label: "TRIGGER", color: "var(--accent-primary)", fg: "#111111", icon: Zap },
+                  { label: "PLANNER", color: "var(--agent-planner)", fg: "#111111", icon: Brain },
+                  { label: "RESEARCH", color: "var(--agent-researcher)", fg: "#111111", icon: Search },
+                  { label: "CODE", color: "var(--agent-coder)", fg: "#ffffff", icon: Code },
+                  { label: "TEST", color: "var(--agent-tester)", fg: "#111111", icon: TestTube },
+                  { label: "REVIEW", color: "var(--agent-reviewer)", fg: "#111111", icon: CheckCircle },
+                  { label: "OUTPUT", color: "var(--accent-success)", fg: "#111111", icon: Sparkles },
+                ].map((step, i, arr) => {
+                  const IconComponent = step.icon;
+                  return (
+                    <div key={step.label} className="w-full flex flex-col items-center">
+                      <div
+                        className="inline-flex items-center justify-center gap-2 px-6 py-2 border-2 border-[var(--border-primary)] shadow-[var(--shadow-brutalist-sm)] transition-transform hover:scale-105 min-w-[160px]"
+                        style={{
+                          background: step.color,
+                          color: step.fg,
+                        }}
                       >
-                        {step.label}
-                      </span>
-                    </div>
-                    {i < arr.length - 1 && (
-                      <div className="flex justify-center my-1">
-                        <ArrowDown
-                          className="w-3 h-3 connector-pulse"
-                          style={{ color: step.color }}
-                          aria-hidden="true"
-                        />
+                        <IconComponent className="w-3.5 h-3.5" style={{ color: step.fg }} />
+                        <span className="text-caption font-extrabold tracking-wide">
+                          {step.label}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {i < arr.length - 1 && (
+                        <div className="flex justify-center my-1">
+                          <ArrowDown
+                            className="w-3.5 h-3.5 connector-pulse"
+                            style={{ color: step.color }}
+                            aria-hidden="true"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -886,41 +885,42 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             {/* Visual */}
             <div className="brutalist-card p-6 landing-glow-cyan order-2 lg:order-1">
-              <div className="space-y-3 text-center">
+              <div className="space-y-2.5 text-center flex flex-col items-center">
                 {[
-                  { label: "DOCUMENT", color: "var(--fg-primary)" },
-                  { label: "INGESTION", color: "var(--agent-researcher)" },
-                  { label: "CHUNKING", color: "var(--accent-tertiary)" },
-                  { label: "VECTOR INDEX", color: "var(--agent-memory)" },
-                  { label: "RETRIEVAL", color: "var(--agent-coder)" },
-                  { label: "AGENT CONTEXT", color: "var(--accent-success)" },
-                ].map((step, i, arr) => (
-                  <div key={step.label}>
-                    <div
-                      className="inline-block px-6 py-2 border-2"
-                      style={{
-                        borderColor: step.color,
-                        background: "var(--bg-surface)",
-                      }}
-                    >
-                      <span
-                        className="text-caption font-bold"
-                        style={{ color: step.color }}
+                  { label: "DOCUMENT", color: "var(--fg-primary)", fg: "#ffffff", icon: FileText },
+                  { label: "INGESTION", color: "var(--agent-researcher)", fg: "#111111", icon: Search },
+                  { label: "CHUNKING", color: "var(--accent-tertiary)", fg: "#111111", icon: Layers },
+                  { label: "VECTOR INDEX", color: "var(--agent-memory, var(--agent-coder))", fg: "#ffffff", icon: Database },
+                  { label: "RETRIEVAL", color: "var(--agent-coder)", fg: "#ffffff", icon: Code },
+                  { label: "AGENT CONTEXT", color: "var(--accent-success)", fg: "#111111", icon: Sparkles },
+                ].map((step, i, arr) => {
+                  const IconComponent = step.icon;
+                  return (
+                    <div key={step.label} className="w-full flex flex-col items-center">
+                      <div
+                        className="inline-flex items-center justify-center gap-2 px-6 py-2 border-2 border-[var(--border-primary)] shadow-[var(--shadow-brutalist-sm)] transition-transform hover:scale-105 min-w-[200px]"
+                        style={{
+                          background: step.color,
+                          color: step.fg,
+                        }}
                       >
-                        {step.label}
-                      </span>
-                    </div>
-                    {i < arr.length - 1 && (
-                      <div className="flex justify-center my-1">
-                        <ArrowDown
-                          className="w-3 h-3 connector-pulse"
-                          style={{ color: step.color }}
-                          aria-hidden="true"
-                        />
+                        <IconComponent className="w-3.5 h-3.5" style={{ color: step.fg }} />
+                        <span className="text-caption font-extrabold tracking-wide">
+                          {step.label}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {i < arr.length - 1 && (
+                        <div className="flex justify-center my-1">
+                          <ArrowDown
+                            className="w-3.5 h-3.5 connector-pulse"
+                            style={{ color: step.color }}
+                            aria-hidden="true"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -984,47 +984,42 @@ export default function LandingPage() {
             </div>
 
             {/* Visual */}
-            <div className="brutalist-card p-6">
-              <div className="space-y-3 text-center">
+            <div className="brutalist-card p-6 landing-glow-cyan">
+              <div className="space-y-2.5 text-center flex flex-col items-center">
                 {[
-                  { label: "AI AGENTS", color: "var(--agent-coder)" },
-                  {
-                    label: "MCP TOOL REGISTRY",
-                    color: "var(--accent-primary)",
-                  },
-                  {
-                    label: "AVAILABLE TOOLS",
-                    color: "var(--agent-researcher)",
-                  },
-                  { label: "EXECUTION", color: "var(--accent-secondary)" },
-                  { label: "AUDIT HISTORY", color: "var(--agent-supervisor)" },
-                ].map((step, i, arr) => (
-                  <div key={step.label}>
-                    <div
-                      className="inline-block px-6 py-2 border-2"
-                      style={{
-                        borderColor: step.color,
-                        background: "var(--bg-surface)",
-                      }}
-                    >
-                      <span
-                        className="text-caption font-bold"
-                        style={{ color: step.color }}
+                  { label: "AI AGENTS", color: "var(--agent-coder)", fg: "#ffffff", icon: Bot },
+                  { label: "MCP TOOL REGISTRY", color: "var(--accent-primary)", fg: "#111111", icon: Wrench },
+                  { label: "AVAILABLE TOOLS", color: "var(--agent-researcher)", fg: "#111111", icon: Puzzle },
+                  { label: "EXECUTION", color: "var(--accent-secondary)", fg: "#111111", icon: Zap },
+                  { label: "AUDIT HISTORY", color: "var(--agent-supervisor, var(--fg-primary))", fg: "#ffffff", icon: ShieldCheck },
+                ].map((step, i, arr) => {
+                  const IconComponent = step.icon;
+                  return (
+                    <div key={step.label} className="w-full flex flex-col items-center">
+                      <div
+                        className="inline-flex items-center justify-center gap-2 px-6 py-2 border-2 border-[var(--border-primary)] shadow-[var(--shadow-brutalist-sm)] transition-transform hover:scale-105 min-w-[200px]"
+                        style={{
+                          background: step.color,
+                          color: step.fg,
+                        }}
                       >
-                        {step.label}
-                      </span>
-                    </div>
-                    {i < arr.length - 1 && (
-                      <div className="flex justify-center my-1">
-                        <ArrowDown
-                          className="w-3 h-3 connector-pulse"
-                          style={{ color: step.color }}
-                          aria-hidden="true"
-                        />
+                        <IconComponent className="w-3.5 h-3.5" style={{ color: step.fg }} />
+                        <span className="text-caption font-extrabold tracking-wide">
+                          {step.label}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {i < arr.length - 1 && (
+                        <div className="flex justify-center my-1">
+                          <ArrowDown
+                            className="w-3.5 h-3.5 connector-pulse"
+                            style={{ color: step.color }}
+                            aria-hidden="true"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

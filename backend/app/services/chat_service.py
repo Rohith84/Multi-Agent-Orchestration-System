@@ -80,15 +80,16 @@ class ChatService:
         # Step 4: Build messages array for Ollama
         messages = self._build_messages(history, user_message)
 
-        # Step 5: Call Ollama
-        ai_response = await self.ollama.chat(messages)
+        # Step 5: Call Ollama with explain model if configured
+        model_to_use = self.settings.model_explain or self.settings.model_name
+        ai_response = await self.ollama.chat(messages, model=model_to_use)
 
         # Step 6: Store assistant response
         assistant_msg = await self.repository.save_message(
             session_id=sid,
             role="assistant",
             message=ai_response,
-            model=self.settings.model_name,
+            model=model_to_use,
         )
 
         logger.info("Chat completed for session %s", sid)
@@ -190,7 +191,7 @@ class ChatService:
         # System prompt — always first
         messages.append({
             "role": "system",
-            "content": self.settings.system_prompt,
+            "content": self.settings.ask_system_prompt,
         })
 
         # Historical messages (excluding system prompts from DB)

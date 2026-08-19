@@ -67,17 +67,30 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
 
       {/* Message bubble */}
       <div
-        className={`relative max-w-[75%] rounded-2xl px-4 py-3 ${
+        className={`relative max-w-[75%] rounded-2xl px-4 py-3 border-2 ${
           isUser
-            ? "bg-gradient-to-br from-violet-600 to-blue-600 text-white shadow-lg shadow-violet-500/20"
-            : "bg-zinc-800/80 text-zinc-100 border border-zinc-700/50 shadow-md"
+            ? "border-[var(--border-primary)] shadow-[var(--shadow-brutalist-sm)]"
+            : "border-[var(--border-primary)] shadow-[var(--shadow-brutalist-sm)]"
         }`}
+        style={
+          isUser
+            ? {
+                background: "var(--accent-secondary)",
+                color: "#FFFFFF",
+                borderColor: "var(--border-primary)",
+              }
+            : {
+                background: "var(--bg-surface)",
+                color: "var(--fg-primary)",
+                borderColor: "var(--border-primary)",
+              }
+        }
       >
         {/* Content */}
         {isUser ? (
-          <p className="text-sm leading-relaxed whitespace-pre-wrap">{content}</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap font-medium">{content}</p>
         ) : (
-          <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-700 prose-code:text-emerald-400 prose-code:before:content-none prose-code:after:content-none prose-headings:text-zinc-100 prose-a:text-blue-400">
+          <div className="prose prose-sm max-w-none leading-relaxed text-[var(--fg-primary)]">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           </div>
         )}
@@ -89,9 +102,8 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           }`}
         >
           <span
-            className={`text-[10px] ${
-              isUser ? "text-white/50" : "text-zinc-500"
-            }`}
+            className="text-[10px] font-mono font-bold"
+            style={{ color: isUser ? "rgba(255,255,255,0.8)" : "var(--fg-tertiary)" }}
           >
             {formattedTime}
             {!isUser && model && ` · ${model}`}
@@ -100,13 +112,13 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           {!isUser && (
             <button
               onClick={handleCopy}
-              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-zinc-700"
+              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded border border-[var(--border-secondary)] hover:bg-[var(--bg-secondary)]"
               title="Copy message"
             >
               {copied ? (
-                <Check className="h-3 w-3 text-emerald-400" />
+                <Check className="h-3 w-3 text-[var(--accent-success)]" />
               ) : (
-                <Copy className="h-3 w-3 text-zinc-500" />
+                <Copy className="h-3 w-3 text-[var(--fg-secondary)]" />
               )}
             </button>
           )}

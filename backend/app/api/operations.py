@@ -8,8 +8,11 @@ Provides:
 
 from __future__ import annotations
 
-import os
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -31,8 +34,14 @@ async def get_system_operations_summary(
     """
     Get live system operations status: memory, CPU, Celery worker status, queue stats, and Redis cache metrics.
     """
-    process = psutil.Process(os.getpid())
-    memory_info = process.memory_info()
+    if psutil is not None:
+        process = psutil.Process(os.getpid())
+        memory_info = process.memory_info()
+        cpu_pct = psutil.cpu_percent()
+        ram_mb = round(memory_info.rss / (1024 * 1024), 2)
+    else:
+        cpu_pct = 0.0
+        ram_mb = 0.0
 
     # Redis cache stats
     cache = get_redis_cache()
@@ -59,8 +68,8 @@ async def get_system_operations_summary(
 
     return {
         "status": "operational",
-        "cpu_usage_percentage": psutil.cpu_percent(),
-        "memory_used_mb": round(memory_info.rss / (1024 * 1024), 2),
+        "cpu_usage_percentage": cpu_pct,
+        "memory_used_mb": ram_mb,
         "workers": {
             "status": worker_status,
             "active_workers_count": active_worker_count,

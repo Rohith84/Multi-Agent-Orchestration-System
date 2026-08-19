@@ -104,6 +104,7 @@ class WorkflowService:
 
     async def restart_workflow(self, workflow_id: uuid.UUID) -> WorkflowDetailSchema | None:
         """Restart a workflow from the beginning."""
+        await self.repo.clear_execution_state(workflow_id)
         workflow = await self.repo.update_workflow(
             workflow_id,
             status="pending",

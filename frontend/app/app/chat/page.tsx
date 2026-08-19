@@ -8,13 +8,16 @@
 
 "use client";
 
+import { useState } from "react";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatWindow } from "@/components/chat/chat-window";
 import { ChatInput } from "@/components/chat/chat-input";
 import { AgentTimeline } from "@/components/chat/agent-timeline";
 import { useChat } from "@/hooks/use-chat";
+import type { ChatMode } from "@/components/chat/chat-input";
 
 export default function ChatPage() {
+  const [draftInput, setDraftInput] = useState("");
   const {
     messages,
     sessionId,
@@ -35,8 +38,17 @@ export default function ChatPage() {
           onNewChat={newChat}
           onClearChat={clearChat}
         />
-        <ChatWindow messages={messages} isStreaming={isPending && !activeAgent} />
-        <ChatInput onSend={sendMessage} disabled={isPending} />
+        <ChatWindow
+          messages={messages}
+          isStreaming={isPending && !activeAgent}
+          onSelectSuggestion={(suggestion) => setDraftInput(suggestion)}
+        />
+        <ChatInput
+          onSend={(message, mode: ChatMode) => sendMessage(message, mode)}
+          disabled={isPending}
+          value={draftInput}
+          onChangeValue={setDraftInput}
+        />
       </div>
 
       {/* Execution Timeline Panel */}

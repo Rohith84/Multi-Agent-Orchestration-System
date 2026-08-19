@@ -5,8 +5,16 @@ Supports PDF, TXT, MD, DOCX, and Source Code.
 
 import io
 import os
-import pypdf
-import docx2txt
+try:
+    import pypdf
+except ImportError:
+    pypdf = None
+
+try:
+    import docx2txt
+except ImportError:
+    docx2txt = None
+
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

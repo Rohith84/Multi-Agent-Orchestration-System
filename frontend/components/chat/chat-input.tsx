@@ -15,13 +15,38 @@ import { Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface ChatInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, mode: ChatMode) => void;
   disabled: boolean;
+  value?: string;
+  onChangeValue?: (val: string) => void;
 }
 
-export function ChatInput({ onSend, disabled }: ChatInputProps) {
-  const [input, setInput] = useState("");
+export type ChatMode = "ask" | "build";
+
+export function ChatInput({ onSend, disabled, value, onChangeValue }: ChatInputProps) {
+  const [internalInput, setInternalInput] = useState("");
+  const [mode, setMode] = useState<ChatMode>("ask");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const input = value !== undefined ? value : internalInput;
+
+  const setInput = useCallback(
+    (val: string) => {
+      setInternalInput(val);
+      onChangeValue?.(val);
+    },
+    [onChangeValue]
+  );
+
+  // Focus and adjust height when value updates externally
+  useEffect(() => {
+    if (value !== undefined) {
+      setInternalInput(value);
+      if (value && textareaRef.current) {
+        textareaRef.current.focus();
+      }
+    }
+  }, [value]);
 
   // Auto-resize textarea
   const adjustHeight = useCallback(() => {
@@ -39,14 +64,13 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
     if (trimmed && !disabled) {
-      onSend(trimmed);
+      onSend(trimmed, mode);
       setInput("");
-      // Reset textarea height
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
     }
-  }, [input, disabled, onSend]);
+  }, [input, disabled, onSend, setInput]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -66,8 +90,25 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   }, [disabled]);
 
   return (
-    <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-900/80 backdrop-blur-md">
+    <div
+      className="px-6 py-4 border-t transition-colors"
+      style={{
+        background: "var(--bg-secondary)",
+        borderColor: "var(--border-primary)",
+      }}
+    >
       <div className="flex items-end gap-3 max-w-4xl mx-auto">
+        <select
+          aria-label="Response mode"
+          value={mode}
+          onChange={(event) => setMode(event.target.value as ChatMode)}
+          disabled={disabled}
+          className="h-[48px] border-2 px-2 text-xs font-black uppercase focus:outline-none disabled:opacity-50"
+          style={{ background: "var(--bg-surface)", color: "var(--fg-primary)", borderColor: "var(--border-primary)" }}
+        >
+          <option value="ask">Ask</option>
+          <option value="build">Build</option>
+        </select>
         <div className="flex-1 relative">
           <textarea
             ref={textareaRef}
@@ -76,11 +117,17 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              disabled ? "Waiting for response..." : "Type your message..."
+              disabled ? "Waiting for response..." : mode === "ask" ? "Ask for an explanation or advice..." : "Describe the change you want built..."
             }
             disabled={disabled}
             rows={1}
-            className="w-full resize-none rounded-xl border border-zinc-700 bg-zinc-800/50 px-4 py-3 pr-12 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            style={{
+              background: "var(--bg-surface)",
+              color: "var(--fg-primary)",
+              borderColor: "var(--border-primary)",
+              boxShadow: "var(--shadow-brutalist-sm)",
+            }}
+            className="w-full resize-none rounded-xl border-2 px-4 py-3.5 pr-12 text-sm font-extrabold placeholder:text-[var(--fg-tertiary)] placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-[var(--accent-secondary)] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           />
         </div>
 
@@ -88,18 +135,27 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           id="send-button"
           onClick={handleSend}
           disabled={disabled || !input.trim()}
-          className="h-[46px] w-[46px] rounded-xl bg-gradient-to-br from-violet-600 to-blue-600 hover:from-violet-500 hover:to-blue-500 text-white shadow-lg shadow-violet-500/20 disabled:opacity-40 disabled:shadow-none transition-all flex-shrink-0"
+          className="h-[48px] w-[48px] rounded-xl border-2 text-black transition-all flex-shrink-0 flex items-center justify-center font-bold hover:scale-105 cursor-pointer"
+          style={{
+            background: "var(--accent-primary)",
+            color: "#111111",
+            borderColor: "var(--border-primary)",
+            boxShadow: "var(--shadow-brutalist-sm)",
+          }}
           size="icon"
         >
           {disabled ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
+            <Loader2 className="h-5 w-5 animate-spin text-black" />
           ) : (
-            <Send className="h-5 w-5" />
+            <Send className="h-5 w-5 text-black" />
           )}
         </Button>
       </div>
 
-      <p className="text-center text-[10px] text-zinc-600 mt-2">
+      <p
+        className="text-center text-[10px] font-mono font-bold mt-2 tracking-wide"
+        style={{ color: "var(--fg-secondary)" }}
+      >
         Press Enter to send · Shift+Enter for new line
       </p>
     </div>

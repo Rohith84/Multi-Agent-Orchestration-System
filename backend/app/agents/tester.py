@@ -77,14 +77,14 @@ class TesterAgent:
                     await workspace_service.write_file(rel_path.strip(), content.strip(), "python")
 
         # 2. Run real pytest test execution against sandbox workspace
-        test_run_res = await self._run_pytest_subprocess()
+        test_run_res = await self._run_pytest_subprocess(workspace_service)
 
         passed = test_run_res["passed"]
         bug_report = None
 
         if not passed:
             bug_report = {
-                "failed_file": "sandbox_workspace/main.py",
+                "failed_file": str((workspace_service.workspace_dir if workspace_service else SANDBOX_DIR) / "main.py"),
                 "failed_test": "test_suite.py",
                 "stack_trace": test_run_res["stderr"] or test_run_res["stdout"],
                 "error_category": "AssertionError",
@@ -110,22 +110,23 @@ class TesterAgent:
             "bug_report": bug_report,
         }
 
-    async def _run_pytest_subprocess(self) -> dict[str, Any]:
+    async def _run_pytest_subprocess(self, workspace_service: WorkspaceService | None = None) -> dict[str, Any]:
         """Execute pytest against sandbox_workspace/ via subprocess."""
         start = time.time()
-        sandbox_path = SANDBOX_DIR.resolve()
+        sandbox_path = (workspace_service.workspace_dir if workspace_service else SANDBOX_DIR).resolve()
 
         if not sandbox_path.exists():
             sandbox_path.mkdir(parents=True, exist_ok=True)
 
-        # Create dummy main.py and test_suite.py if empty
-        main_file = sandbox_path / "main.py"
-        test_file = sandbox_path / "test_suite.py"
-
-        if not main_file.exists():
-            main_file.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
-        if not test_file.exists():
-            test_file.write_text("from main import add\ndef test_add():\n    assert add(2, 3) == 5\n", encoding="utf-8")
+        test_files = list(sandbox_path.rglob("test_*.py")) + list(sandbox_path.rglob("*_test.py"))
+        if not test_files:
+            return {
+                "passed": False,
+                "exit_code": None,
+                "stdout": "",
+                "stderr": "No generated test files were found in the session workspace.",
+                "execution_time": round(time.time() - start, 2),
+            }
 
         try:
             cmd = [sys.executable, "-m", "pytest", str(sandbox_path)]
@@ -149,8 +150,8 @@ class TesterAgent:
         except Exception as e:
             logger.warning("Pytest subprocess execution failed: %s", e)
             return {
-                "passed": True,  # Fallback to true if pytest module isn't installed
-                "exit_code": 0,
+                "passed": False,
+                "exit_code": None,
                 "stdout": f"Test runner output: {e}",
                 "stderr": "",
                 "execution_time": 0.1,

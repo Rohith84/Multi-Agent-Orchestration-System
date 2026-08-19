@@ -73,36 +73,51 @@ export function AgentTimeline({ executions, activeAgent }: AgentTimelineProps) {
   const getStatusClasses = (status: string) => {
     switch (status) {
       case "running":
-        return "border-violet-500/30 bg-violet-500/5 text-violet-300";
+        return "border-2 border-[var(--accent-secondary)] bg-[var(--bg-surface)] text-[var(--fg-primary)] shadow-sm";
       case "paused_approval":
-        return "border-amber-500/40 bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30";
+        return "border-2 border-[var(--accent-warning)] bg-[var(--bg-surface)] text-[var(--fg-primary)] ring-2 ring-amber-500/30";
       case "retrying":
-        return "border-amber-500/30 bg-amber-500/5 text-amber-300";
+        return "border-2 border-[var(--accent-warning)] bg-[var(--bg-surface)] text-[var(--fg-primary)]";
       case "success":
-        return "border-emerald-500/30 bg-emerald-500/5 text-emerald-300";
+        return "border-2 border-[var(--accent-success)] bg-[var(--bg-surface)] text-[var(--fg-primary)]";
       case "failed":
-        return "border-red-500/30 bg-red-500/5 text-red-300";
+        return "border-2 border-[var(--accent-error)] bg-[var(--bg-surface)] text-[var(--fg-primary)]";
       default:
-        return "border-zinc-800 bg-zinc-900/20 text-zinc-500";
+        return "border-2 border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--fg-primary)] shadow-[var(--shadow-brutalist-sm)]";
     }
   };
 
   return (
-    <div className="w-80 h-full border-l border-zinc-800 bg-zinc-900/40 backdrop-blur-md flex flex-col">
-      <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-          <Terminal className="h-4 w-4 text-violet-400" />
+    <div
+      className="w-80 h-full border-l flex flex-col transition-colors"
+      style={{
+        background: "var(--bg-surface)",
+        borderColor: "var(--border-secondary)",
+      }}
+    >
+      <div
+        className="px-6 py-4 border-b flex items-center justify-between"
+        style={{ borderColor: "var(--border-secondary)" }}
+      >
+        <h2
+          className="text-sm font-black flex items-center gap-2 tracking-tight"
+          style={{ color: "var(--fg-primary)" }}
+        >
+          <Terminal className="h-4 w-4 text-[var(--accent-secondary)]" />
           Agent Execution Timeline
         </h2>
         {activeAgent && (
-          <span className="flex items-center gap-1.5 text-xs text-violet-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
+          <span
+            className="flex items-center gap-1.5 text-xs font-bold"
+            style={{ color: "var(--accent-secondary)" }}
+          >
+            <span className="h-2 w-2 rounded-full bg-[var(--accent-secondary)] animate-pulse" />
             Active
           </span>
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {AGENTS_LIST.map((agent, index) => {
           const state = executions[agent] || {
             agentName: agent,
@@ -118,23 +133,31 @@ export function AgentTimeline({ executions, activeAgent }: AgentTimelineProps) {
           return (
             <div
               key={agent}
-              className={`rounded-xl border transition-all duration-300 ${statusClasses}`}
+              className={`rounded-lg transition-all duration-300 ${statusClasses}`}
             >
               {/* Header */}
               <div
                 onClick={() => state.output && toggleExpand(agent)}
-                className={`flex items-center justify-between p-4 ${
-                  state.output ? "cursor-pointer hover:bg-zinc-800/20" : ""
+                className={`flex items-center justify-between p-3.5 ${
+                  state.output ? "cursor-pointer hover:opacity-90" : ""
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 flex items-center justify-center h-8 w-8">
+                  <div className="flex-shrink-0 flex items-center justify-center h-7 w-7">
                     {getStatusIcon(state.status)}
                   </div>
                   <div>
-                    <h3 className="text-xs font-semibold">{getAgentLabel(agent)}</h3>
+                    <h3
+                      className="text-xs font-black tracking-tight"
+                      style={{ color: "var(--fg-primary)" }}
+                    >
+                      {getAgentLabel(agent)}
+                    </h3>
                     {state.executionTime > 0 && (
-                      <div className="flex items-center gap-1 mt-1 text-[10px] text-zinc-500">
+                      <div
+                        className="flex items-center gap-1 mt-0.5 text-[10px] font-mono font-bold"
+                        style={{ color: "var(--fg-secondary)" }}
+                      >
                         <Clock className="h-3 w-3" />
                         {state.executionTime}s
                       </div>

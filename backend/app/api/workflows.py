@@ -123,11 +123,10 @@ async def start_workflow_chat(
 async def approve_workflow(
     workflow_id: str,
     decision: WorkflowApprovalDecision,
-    db: AsyncSession = Depends(get_db),
     service: WorkflowService = Depends(_get_workflow_service),
-) -> StreamingResponse:
+) -> WorkflowDetailSchema:
     """
-    Approve a pending approval gate and resume execution via SSE streaming.
+    Approve a pending approval gate. The client then calls /resume to open its SSE stream.
     """
     try:
         wid = uuid.UUID(workflow_id)
@@ -138,30 +137,13 @@ async def approve_workflow(
     if not detail:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
-    # Approve decision in DB
     try:
-        await service.approve_workflow_stage(wid, comments=decision.comments)
+        updated = await service.approve_workflow_stage(wid, comments=decision.comments)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-    executor = WorkflowExecutor(db)
-    session_id = uuid.UUID(detail.session_id)
-
-    return StreamingResponse(
-        executor.execute(
-            user_request=detail.user_request,
-            session_id=session_id,
-            require_approval_agents=detail.require_approval_agents,
-            workflow_id=wid,
-            resume_agent=detail.current_agent,
-        ),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return updated
 
 
 @router.post("/{workflow_id}/reject")
@@ -236,6 +218,7 @@ async def cancel_workflow(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid workflow ID format")
 
+    WorkflowExecutor.request_cancellation(wid)
     res = await service.cancel_workflow(wid)
     if not res:
         raise HTTPException(status_code=404, detail="Workflow not found")

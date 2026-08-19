@@ -27,13 +27,13 @@ SANDBOX_DIR = Path("sandbox_workspace").resolve()
 
 class WorkspaceService:
     """
-    Manages isolated project workspace files in sandbox_workspace/ and DB state.
+    Manages an isolated project workspace under sandbox_workspace/<session_id>/.
     """
 
     def __init__(self, db: AsyncSession, session_id: uuid.UUID | None = None) -> None:
         self.db = db
         self.session_id = session_id or uuid.uuid4()
-        self.workspace_dir = SANDBOX_DIR
+        self.workspace_dir = SANDBOX_DIR / str(self.session_id)
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
     def _resolve_safe_path(self, relative_path: str) -> Path:

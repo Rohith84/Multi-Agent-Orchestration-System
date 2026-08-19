@@ -5,14 +5,18 @@
 
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   fetchAgentHistory,
   deleteAgentHistory,
+  sendChatMessage,
   type ChatMessage,
   type AgentExecution,
 } from "@/services/chat-service";
+import type { ChatMode } from "@/components/chat/chat-input";
+
+const LAST_SESSION_STORAGE_KEY = "multiagent:last-chat-session";
 
 export interface LocalMessage {
   id: string;
@@ -54,6 +58,12 @@ export function useChat() {
   const queryClient = useQueryClient();
   const messageIdCounter = useRef(0);
 
+  const rememberSession = useCallback((sid: string) => {
+    setSessionId(sid);
+    window.localStorage.setItem(LAST_SESSION_STORAGE_KEY, sid);
+    window.history.replaceState(null, "", `/app/chat?session=${encodeURIComponent(sid)}`);
+  }, []);
+
   const generateLocalId = () => {
     messageIdCounter.current += 1;
     return `local-${Date.now()}-${messageIdCounter.current}`;
@@ -66,6 +76,8 @@ export function useChat() {
     setActiveAgent(null);
     setIsPending(false);
     setExecutions(INITIAL_EXECUTIONS);
+    window.localStorage.removeItem(LAST_SESSION_STORAGE_KEY);
+    window.history.replaceState(null, "", "/app/chat");
     queryClient.invalidateQueries({ queryKey: ["chat-history"] });
   }, [queryClient]);
 
@@ -74,7 +86,7 @@ export function useChat() {
     async (sid: string) => {
       try {
         const history = await fetchAgentHistory(sid);
-        setSessionId(sid);
+        rememberSession(sid);
 
         const localMessages: LocalMessage[] = history.chat_history
           .map((msg: ChatMessage) => ({
@@ -102,8 +114,15 @@ export function useChat() {
         console.error("Failed to load chat history:", error);
       }
     },
-    []
+    [rememberSession]
   );
+
+  useEffect(() => {
+    const querySession = new URLSearchParams(window.location.search).get("session");
+    const rememberedSession = window.localStorage.getItem(LAST_SESSION_STORAGE_KEY);
+    const sid = querySession || rememberedSession;
+    if (sid) void loadHistory(sid);
+  }, [loadHistory]);
 
   // Delete current session
   const clearChat = useCallback(async () => {
@@ -119,7 +138,7 @@ export function useChat() {
 
   // Send a message via SSE streaming
   const sendMessage = useCallback(
-    async (messageText: string) => {
+    async (messageText: string, mode: ChatMode = "ask") => {
       if (!messageText.trim() || isPending) return;
 
       setIsPending(true);
@@ -135,6 +154,25 @@ export function useChat() {
       setMessages((prev) => [...prev, userMsg]);
 
       try {
+        if (mode === "ask") {
+          const result = await sendChatMessage({
+            message: messageText,
+            session_id: sessionId || undefined,
+          });
+          rememberSession(result.session_id);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: generateLocalId(),
+              role: "assistant",
+              content: result.response,
+              model: result.model,
+              timestamp: result.created_at,
+            },
+          ]);
+          return;
+        }
+
         const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
         const response = await fetch(`${API_URL}/api/agents/chat`, {
           method: "POST",
@@ -176,6 +214,10 @@ export function useChat() {
               const data = JSON.parse(jsonStr);
 
               switch (data.event) {
+                case "workflow_started":
+                  rememberSession(data.session_id);
+                  break;
+
                 case "agent_start":
                   setActiveAgent(data.agent);
                   setExecutions((prev) => ({
@@ -210,9 +252,7 @@ export function useChat() {
                   break;
 
                 case "workflow_complete":
-                  if (!sessionId) {
-                    setSessionId(data.session_id);
-                  }
+                  rememberSession(data.session_id);
                   setActiveAgent(null);
                   setMessages((prev) => [
                     ...prev,
@@ -293,7 +333,7 @@ export function useChat() {
         setIsPending(false);
       }
     },
-    [sessionId, isPending]
+    [sessionId, isPending, rememberSession]
   );
 
   return {

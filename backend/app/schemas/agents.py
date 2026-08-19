@@ -11,6 +11,7 @@ class AgentRequest(BaseModel):
     """Request structure for starting a multi-agent chat."""
     message: str = Field(..., min_length=1)
     session_id: str | None = Field(default=None)
+    require_approval_agents: list[str] = Field(default_factory=list)
 
 
 class AgentExecutionSchema(BaseModel):

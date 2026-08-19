@@ -4,6 +4,7 @@ Pydantic schemas for Workspace, Test Execution, Static Analysis, and Quality Gat
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -13,8 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class WorkspaceFileSchema(BaseModel):
     """Schema for a tracked file in the project workspace."""
 
-    id: str
-    session_id: str
+    id: uuid.UUID | str
+    session_id: uuid.UUID | str
     file_path: str
     content: str
     language: str
@@ -29,7 +30,7 @@ class WorkspaceFileSchema(BaseModel):
 class WorkspaceSnapshotSchema(BaseModel):
     """Schema for a workspace state snapshot."""
 
-    id: str
+    id: uuid.UUID | str
     snapshot_name: str
     file_manifest: dict[str, Any]
     created_at: datetime
@@ -51,8 +52,8 @@ class BugReportSchema(BaseModel):
 class TestReportSchema(BaseModel):
     """Schema for test execution output."""
 
-    id: str
-    workflow_id: str
+    id: uuid.UUID | str
+    workflow_id: uuid.UUID | str
     project_type: str
     test_command: str
     passed: bool
@@ -68,8 +69,8 @@ class TestReportSchema(BaseModel):
 class QualityReportSchema(BaseModel):
     """Schema for static analysis findings and quality gate decisions."""
 
-    id: str
-    workflow_id: str
+    id: uuid.UUID | str
+    workflow_id: uuid.UUID | str
     quality_gate: str
     overall_score: float
     lint_findings: list[dict[str, Any]]

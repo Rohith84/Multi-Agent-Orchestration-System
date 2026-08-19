@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-import chromadb
+try:
+    import chromadb
+except ImportError:
+    chromadb = None
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -26,11 +29,14 @@ class PlanningMemoryStore:
         self.settings = get_settings()
         self.path = self.settings.vector_db_path
         self.collection_name = "planning_memory"
-        self._client: chromadb.PersistentClient | None = None
+        self._client: Any | None = None
         self._collection: Any | None = None
         self.embedding_generator = OllamaEmbeddingGenerator()
 
-    def _get_client(self) -> chromadb.PersistentClient:
+    def _get_client(self) -> Any:
+        if chromadb is None:
+            logger.warning("ChromaDB is not installed in environment.")
+            return None
         if self._client is None:
             logger.info("Initializing ChromaDB PersistentClient for Planning Memory at path=%s", self.path)
             self._client = chromadb.PersistentClient(path=self.path)

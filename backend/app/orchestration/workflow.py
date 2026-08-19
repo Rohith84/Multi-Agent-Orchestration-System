@@ -6,6 +6,7 @@ Runs the LangGraph orchestration flow step-by-step with automatic code repair lo
 
 from __future__ import annotations
 
+import asyncio
 import time
 import json
 import uuid
@@ -51,6 +52,8 @@ class WorkflowExecutor:
     Coordinates LangGraph execution, self-repair loops, file persistence, and quality gates.
     """
 
+    _cancellation_events: dict[uuid.UUID, asyncio.Event] = {}
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.agent_repo = AgentExecutionRepository(db)
@@ -60,6 +63,25 @@ class WorkflowExecutor:
         self.planning_memory_store = PlanningMemoryStore()
         self.ollama = OllamaClient()
         self.settings = get_settings()
+
+    @classmethod
+    def request_cancellation(cls, workflow_id: uuid.UUID) -> None:
+        """Signal a locally running workflow to stop at its next safe boundary."""
+        event = cls._cancellation_events.get(workflow_id)
+        if event:
+            event.set()
+
+    @staticmethod
+    def _next_agent(node_name: str, state: AgentState) -> str:
+        if node_name == "planner":
+            return "research"
+        if node_name == "research":
+            return "coder"
+        if node_name == "coder":
+            return "tester"
+        if node_name == "tester":
+            return "reviewer" if state.get("test_passed") else "coder"
+        return "end"
 
     async def execute(
         self,
@@ -72,12 +94,15 @@ class WorkflowExecutor:
         """
         Executes the multi-agent graph with self-repair feedback loops and yields SSE updates.
         """
-        require_approval_agents = require_approval_agents or []
+        require_approval_agents = [agent.lower() for agent in (require_approval_agents or [])]
         workspace = WorkspaceService(self.db, session_id=session_id)
 
         # 1. Resolve or create Workflow DB record
         if workflow_id:
             wf = await self.wf_repo.get_workflow(workflow_id)
+            if not wf:
+                yield self._format_sse_event({"event": "workflow_failed", "error": "Workflow not found."})
+                return
         else:
             wf = await self.wf_repo.create_workflow(
                 session_id=session_id,
@@ -85,6 +110,14 @@ class WorkflowExecutor:
                 require_approval_agents=require_approval_agents,
             )
             workflow_id = wf.id
+
+        # Emit immediate workflow_started event so frontend receives IDs right away
+        yield self._format_sse_event({
+            "event": "workflow_started",
+            "workflow_id": str(workflow_id),
+            "session_id": str(session_id),
+            "message": "Workflow execution started",
+        })
 
         # 2. Save user message if starting fresh
         if not resume_agent:
@@ -118,10 +151,19 @@ class WorkflowExecutor:
             if cp and cp.shared_state:
                 initial_state.update(cp.shared_state)
 
+        start_at = str(initial_state.get("next_agent") or resume_agent or "planner")
+        if start_at == "end":
+            final_answer = initial_state.get("review", "Workflow completed.")
+            await self.wf_repo.update_workflow(workflow_id, status="completed", current_agent="end", progress_percentage=100)
+            await self.chat_repo.save_message(session_id=session_id, role="assistant", message=final_answer, model=self.settings.model_reviewer)
+            await self.db.commit()
+            yield self._format_sse_event({"event": "workflow_complete", "workflow_id": str(workflow_id), "session_id": str(session_id), "response": final_answer, "progress_percentage": 100})
+            return
+
         await self.wf_repo.update_workflow(
             workflow_id,
             status="running",
-            current_agent=resume_agent or "planner",
+            current_agent=start_at,
         )
         await self.db.commit()
 
@@ -135,16 +177,28 @@ class WorkflowExecutor:
             }
         }
 
-        graph = create_agent_graph(self.ollama)
+        graph = create_agent_graph(self.ollama, workspace_service=workspace, start_at=start_at)
         current_state = initial_state
-        total_tokens_accumulated = 0
-        agent_scores_accumulated = []
+        started_at = time.perf_counter()
+        cancellation_event = asyncio.Event()
+        self._cancellation_events[workflow_id] = cancellation_event
 
-        # Run compiled LangGraph node stream
-        async for output_state in graph.astream(initial_state, config=config):
-            for node_name, node_output in output_state.items():
+        try:
+            # Run compiled LangGraph node stream
+            async for output_state in graph.astream(initial_state, config=config):
+                if cancellation_event.is_set():
+                    await self._mark_cancelled(workflow_id, session_id, time.perf_counter() - started_at)
+                    yield self._format_sse_event({"event": "workflow_cancelled", "workflow_id": str(workflow_id)})
+                    return
+
+                node_name, node_output = next(iter(output_state.items()))
+                if cancellation_event.is_set():
+                    await self._mark_cancelled(workflow_id, session_id, time.perf_counter() - started_at)
+                    yield self._format_sse_event({"event": "workflow_cancelled", "workflow_id": str(workflow_id)})
+                    return
                 current_state.update(node_output)
                 pct = AGENT_PROGRESS_MAP.get(node_name, 50)
+                execution_time = float(node_output.get("execution_time", 0.0))
 
                 yield self._format_sse_event({
                     "event": "agent_start",
@@ -185,9 +239,11 @@ class WorkflowExecutor:
                     agent_name=node_name,
                     input_content=self._get_agent_input(node_name, current_state),
                     output_content=output_text,
-                    execution_time=1.5,
+                    execution_time=execution_time,
                     status="success",
                 )
+                next_agent = self._next_agent(node_name, current_state)
+                current_state["next_agent"] = next_agent
                 await self.wf_repo.save_checkpoint(
                     workflow_id=workflow_id,
                     agent_name=node_name,
@@ -196,6 +252,27 @@ class WorkflowExecutor:
                     research_context=current_state.get("research_notes", "")[:1000],
                     chat_context=user_request[:500],
                 )
+                if node_name == "tester":
+                    self.db.add(TestReport(
+                        workflow_id=workflow_id,
+                        passed=bool(current_state.get("test_passed")),
+                        execution_time=execution_time,
+                        stdout=str(current_state.get("test_results", "")),
+                        stderr=str((current_state.get("bug_report") or {}).get("stack_trace", "")),
+                        bug_report=current_state.get("bug_report") or {},
+                    ))
+                if node_name == "reviewer":
+                    self.db.add(QualityReport(
+                        workflow_id=workflow_id,
+                        quality_gate=str(current_state.get("quality_gate", "PASS")),
+                    ))
+                await self.wf_repo.update_workflow(
+                    workflow_id,
+                    status="running",
+                    current_agent=node_name,
+                    progress_percentage=pct,
+                    execution_time=round(time.perf_counter() - started_at, 3),
+                )
                 await self.db.commit()
 
                 yield self._format_sse_event({
@@ -203,33 +280,55 @@ class WorkflowExecutor:
                     "agent": node_name,
                     "status": "success",
                     "output": output_text,
-                    "execution_time": 1.5,
+                    "execution_time": execution_time,
                     "progress_percentage": pct,
                 })
 
-        # Save final response
-        final_answer = current_state.get("review", "Workflow completed.")
-        await self.wf_repo.update_workflow(
-            workflow_id,
-            status="completed",
-            progress_percentage=100,
-            current_agent="end",
-        )
-        await self.chat_repo.save_message(
-            session_id=session_id,
-            role="assistant",
-            message=final_answer,
-            model=self.settings.model_reviewer,
-        )
-        await self.db.commit()
+                if node_name in require_approval_agents:
+                    await self.wf_repo.create_approval(workflow_id, node_name)
+                    await self.wf_repo.update_workflow(
+                        workflow_id,
+                        status="paused_approval",
+                        current_agent=node_name,
+                        progress_percentage=pct,
+                        execution_time=round(time.perf_counter() - started_at, 3),
+                    )
+                    await self.db.commit()
+                    yield self._format_sse_event({
+                        "event": "workflow_paused_approval",
+                        "workflow_id": str(workflow_id),
+                        "agent": node_name,
+                        "next_agent": next_agent,
+                        "message": f"Approval required after {node_name.capitalize()}.",
+                    })
+                    return
 
-        yield self._format_sse_event({
-            "event": "workflow_complete",
-            "workflow_id": str(workflow_id),
-            "session_id": str(session_id),
-            "response": final_answer,
-            "progress_percentage": 100,
-        })
+            # Save final response
+            final_answer = current_state.get("review", "Workflow completed.")
+            await self.wf_repo.update_workflow(
+                workflow_id,
+                status="completed",
+                progress_percentage=100,
+                current_agent="end",
+                execution_time=round(time.perf_counter() - started_at, 3),
+            )
+            await self.chat_repo.save_message(session_id=session_id, role="assistant", message=final_answer, model=self.settings.model_reviewer)
+            await self.db.commit()
+            yield self._format_sse_event({"event": "workflow_complete", "workflow_id": str(workflow_id), "session_id": str(session_id), "response": final_answer, "progress_percentage": 100})
+        except asyncio.CancelledError:
+            await self._mark_cancelled(workflow_id, session_id, time.perf_counter() - started_at)
+            raise
+        except Exception as exc:
+            logger.exception("Workflow %s failed", workflow_id)
+            await self.wf_repo.update_workflow(workflow_id, status="failed", error_message=str(exc), execution_time=round(time.perf_counter() - started_at, 3))
+            await self.db.commit()
+            yield self._format_sse_event({"event": "workflow_failed", "workflow_id": str(workflow_id), "error": "Workflow execution failed."})
+        finally:
+            self._cancellation_events.pop(workflow_id, None)
+
+    async def _mark_cancelled(self, workflow_id: uuid.UUID, session_id: uuid.UUID, elapsed: float) -> None:
+        await self.wf_repo.update_workflow(workflow_id, status="cancelled", error_message="Workflow cancelled by user", execution_time=round(elapsed, 3))
+        await self.db.commit()
 
     def _format_sse_event(self, data: dict) -> str:
         """Helper to format dictionary to SSE data line."""

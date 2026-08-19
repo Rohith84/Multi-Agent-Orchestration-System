@@ -77,3 +77,11 @@ docker-compose.override.yml
 # ========================
 .DS_Store
 *.log
+
+# ========================
+# Runtime Data (never commit)
+# ========================
+backend/sandbox_workspace/
+backend/chroma_db/
+backend/*.bin
+backend/*.parquet

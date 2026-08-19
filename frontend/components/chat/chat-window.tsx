@@ -17,9 +17,10 @@ import type { LocalMessage } from "@/hooks/use-chat";
 interface ChatWindowProps {
   messages: LocalMessage[];
   isStreaming: boolean;
+  onSelectSuggestion?: (suggestion: string) => void;
 }
 
-export function ChatWindow({ messages, isStreaming }: ChatWindowProps) {
+export function ChatWindow({ messages, isStreaming, onSelectSuggestion }: ChatWindowProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -37,15 +38,24 @@ export function ChatWindow({ messages, isStreaming }: ChatWindowProps) {
       >
         <div className="text-center space-y-6 max-w-md px-6">
           {/* Animated icon */}
-          <div className="mx-auto w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-600/20 to-blue-500/20 border border-violet-500/20 flex items-center justify-center shadow-xl shadow-violet-500/10">
-            <Bot className="h-10 w-10 text-violet-400" />
+          <div
+            className="mx-auto w-20 h-20 border-2 border-[var(--border-primary)] flex items-center justify-center shadow-[var(--shadow-brutalist)]"
+            style={{ background: "var(--accent-secondary)", color: "#FFFFFF" }}
+          >
+            <Bot className="h-10 w-10" />
           </div>
 
           <div>
-            <h2 className="text-xl font-semibold text-white mb-2">
+            <h2
+              className="text-xl font-black mb-2 tracking-tight"
+              style={{ color: "var(--fg-primary)" }}
+            >
               AI Assistant
             </h2>
-            <p className="text-sm text-zinc-400 leading-relaxed">
+            <p
+              className="text-sm font-medium leading-relaxed"
+              style={{ color: "var(--fg-secondary)" }}
+            >
               Ask me anything — I can help with coding, debugging, architecture,
               explanations, and more.
             </p>
@@ -60,9 +70,20 @@ export function ChatWindow({ messages, isStreaming }: ChatWindowProps) {
             ].map((suggestion) => (
               <button
                 key={suggestion}
-                className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-700/50 bg-zinc-800/50 text-xs text-zinc-400 hover:text-violet-300 hover:border-violet-500/30 hover:bg-violet-500/10 transition-all"
+                type="button"
+                onClick={() => onSelectSuggestion?.(suggestion)}
+                className="group flex items-center gap-1.5 px-3 py-2 border-2 text-xs font-extrabold transition-all hover:scale-105 cursor-pointer"
+                style={{
+                  background: "var(--bg-surface)",
+                  color: "var(--fg-primary)",
+                  borderColor: "var(--border-primary)",
+                  boxShadow: "var(--shadow-brutalist-sm)",
+                }}
               >
-                <Sparkles className="h-3 w-3 text-violet-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <Sparkles
+                  className="h-3.5 w-3.5 transition-transform group-hover:scale-110"
+                  style={{ color: "var(--accent-secondary)" }}
+                />
                 {suggestion}
               </button>
             ))}

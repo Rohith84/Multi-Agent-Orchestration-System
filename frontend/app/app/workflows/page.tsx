@@ -63,6 +63,7 @@ export default function WorkflowManagementPage() {
   // Create Modal & Schedule Modal State
   const [showRunModal, setShowRunModal] = useState(false);
   const [runGoalInput, setRunGoalInput] = useState("");
+  const [requireApprovalAgents, setRequireApprovalAgents] = useState<string[]>(["coder"]);
   const [submittingRun, setSubmittingRun] = useState(false);
 
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -148,24 +149,45 @@ export default function WorkflowManagementPage() {
       const response = await fetch(`${API_URL}/api/workflows/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: runGoalInput.trim() }),
+        body: JSON.stringify({
+          message: runGoalInput.trim(),
+          require_approval_agents: requireApprovalAgents,
+        }),
       });
 
       if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
 
-      // Parse first chunk to capture generated workflow / session ID
+      // Read stream until workflow_id is found
       const reader = response.body?.getReader();
       if (reader) {
-        const { value } = await reader.read();
-        const text = new TextDecoder().decode(value);
-        const match = text.match(/"workflow_id":\s*"([^"]+)"/);
-        if (match && match[1]) {
+        let foundId = "";
+        for (let i = 0; i < 10; i++) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const text = new TextDecoder().decode(value);
+          const match = text.match(/"workflow_id":\s*"([^"]+)"/);
+          if (match && match[1]) {
+            foundId = match[1];
+            break;
+          }
+        }
+        if (foundId) {
           setShowRunModal(false);
           setRunGoalInput("");
-          router.push(`/app/workflows/${match[1]}`);
+          router.push(`/app/workflows/${foundId}`);
           return;
         }
       }
+
+      // Fallback: fetch latest workflow list and navigate
+      const latest = await fetchWorkflows({ limit: 1 });
+      if (latest.workflows && latest.workflows.length > 0) {
+        setShowRunModal(false);
+        setRunGoalInput("");
+        router.push(`/app/workflows/${latest.workflows[0].id}`);
+        return;
+      }
+
       setShowRunModal(false);
       setRunGoalInput("");
       loadData(true);
@@ -471,13 +493,38 @@ export default function WorkflowManagementPage() {
             </p>
             <form onSubmit={handleStartWorkflow} className="space-y-4">
               <textarea
-                rows={4}
+                rows={3}
                 required
                 placeholder="e.g. Build a REST API endpoint for user authentication with unit tests..."
                 value={runGoalInput}
                 onChange={(e) => setRunGoalInput(e.target.value)}
                 className="w-full p-3 border-2 border-[var(--border-primary)] bg-[var(--bg-primary)] text-xs font-bold text-[var(--fg-primary)] focus:outline-none"
               />
+
+              <div>
+                <label className="text-caption font-bold uppercase block mb-1.5" style={{ color: "var(--fg-secondary)" }}>
+                  Require Human Approval Gates
+                </label>
+                <div className="flex flex-wrap gap-4 p-2.5 border-2 border-[var(--border-primary)] bg-[var(--bg-primary)]">
+                  {["coder", "tester", "reviewer"].map((agent) => (
+                    <label key={agent} className="flex items-center gap-2 text-xs font-bold uppercase cursor-pointer" style={{ color: "var(--fg-primary)" }}>
+                      <input
+                        type="checkbox"
+                        checked={requireApprovalAgents.includes(agent)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setRequireApprovalAgents((prev) => [...prev, agent]);
+                          } else {
+                            setRequireApprovalAgents((prev) => prev.filter((a) => a !== agent));
+                          }
+                        }}
+                        className="w-4 h-4 accent-[var(--accent-lime)]"
+                      />
+                      {agent}
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
