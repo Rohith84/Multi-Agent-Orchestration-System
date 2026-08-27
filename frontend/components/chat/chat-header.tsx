@@ -8,7 +8,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bot, Plus, Trash2, Cpu } from "lucide-react";
+import { Bot, Plus, Trash2, Cpu, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import api from "@/lib/api";
@@ -45,6 +45,13 @@ export function ChatHeader({
       clearInterval(interval);
     };
   }, []);
+
+  const handleExportZip = () => {
+    if (!sessionId) return;
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+    window.open(`${backendUrl}/api/workspace/export-zip?session_id=${encodeURIComponent(sessionId)}`, "_blank");
+  };
+
   return (
     <div
       className="flex items-center justify-between px-6 py-4 border-b transition-colors"
@@ -105,6 +112,24 @@ export function ChatHeader({
       </div>
 
       <div className="flex items-center gap-2">
+        {sessionId && (
+          <Button
+            id="export-zip-btn"
+            variant="outline"
+            size="sm"
+            onClick={handleExportZip}
+            className="text-xs font-bold border-2 transition-all flex items-center gap-1"
+            style={{
+              borderColor: "var(--accent-secondary)",
+              color: "var(--accent-secondary)",
+              background: "var(--bg-surface)",
+            }}
+          >
+            <Download className="h-4 w-4" />
+            Export Code (.zip)
+          </Button>
+        )}
+
         <Button
           id="new-chat-btn"
           variant="outline"

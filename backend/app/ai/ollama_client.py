@@ -22,10 +22,7 @@ logger = get_logger(__name__)
 
 class OllamaClient:
     """
-    Async client for the Ollama REST API.
-
-    Sends chat completions with full conversation context
-    and handles all error scenarios gracefully.
+    Unified LLM Client supporting both local Ollama and Groq Cloud API.
     """
 
     def __init__(self) -> None:
@@ -33,6 +30,7 @@ class OllamaClient:
         self.base_url = settings.ollama_base_url
         self.model_name = settings.model_name
         self.timeout = settings.ollama_timeout
+        self.groq_api_key = settings.groq_api_key
 
     async def chat(
         self,
@@ -40,29 +38,76 @@ class OllamaClient:
         model: str | None = None,
     ) -> str:
         """
-        Send a chat completion request to Ollama.
-
-        Args:
-            messages: List of message dicts with 'role' and 'content' keys.
-                      Should include system prompt, history, and user message.
-            model: Optional model override. Defaults to configured model.
-
-        Returns:
-            The assistant's response content as a string.
-
-        Raises:
-            OllamaConnectionError: If Ollama is unreachable.
-            OllamaModelNotFoundError: If the model is not available.
-            OllamaTimeoutError: If the request times out.
+        Send a chat completion request to Groq API or local Ollama.
         """
         model = model or self.model_name
+
+        if self.groq_api_key:
+            try:
+                return await self._chat_groq(messages, model)
+            except Exception as e:
+                logger.warning("Groq API call failed (%s). Falling back to local Ollama.", e)
+                return await self._chat_ollama(messages, "qwen2.5-coder:3b")
+
+        return await self._chat_ollama(messages, model)
+
+    async def _chat_groq(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+    ) -> str:
+        """Send request to Groq Cloud OpenAI-compatible Endpoint."""
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.groq_api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.2,
+        }
+
+        logger.info(
+            "Sending request to Groq API (model=%s, messages=%d)",
+            model,
+            len(messages),
+        )
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+
+            data = response.json()
+            assistant_message = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+
+            logger.info(
+                "Received response from Groq API (model=%s, length=%d chars)",
+                model,
+                len(assistant_message),
+            )
+            return assistant_message
+
+    async def _chat_ollama(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+    ) -> str:
+        """Send chat completion request to local Ollama."""
         url = f"{self.base_url}/api/chat"
 
         payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "stream": False,
+            "keep_alive": "15m",
             "options": {
+                "num_gpu": 99,
+                "num_ctx": 2048,
                 "num_predict": 512,
                 "temperature": 0.2,
             },

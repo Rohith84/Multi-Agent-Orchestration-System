@@ -34,17 +34,20 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
 
-    # Ollama
+    # Cloud AI Providers
+    groq_api_key: str = ""
+
+    # Ollama / Cloud Models
     ollama_base_url: str = "http://localhost:11434"
-    model_name: str = "qwen2.5-coder:7b"
+    model_name: str = "openai/gpt-oss-120b"
     ollama_timeout: int = 120
 
-    # Agent specific models
-    model_planner: str = "llama3.1:8b"
-    model_research: str = "llama3.1:8b"
-    model_coder: str = "qwen2.5-coder:7b"
-    model_tester: str = "qwen2.5-coder:7b"
-    model_reviewer: str = "llama3.1:8b"
+    # Agent specific models — defaulted to openai/gpt-oss-120b for high-capability multi-agent orchestration
+    model_planner: str = "openai/gpt-oss-120b"
+    model_research: str = "openai/gpt-oss-120b"
+    model_coder: str = "openai/gpt-oss-120b"
+    model_tester: str = "openai/gpt-oss-120b"
+    model_reviewer: str = "openai/gpt-oss-120b"
 
     # RAG Settings
     vector_db_path: str = "chroma_db"

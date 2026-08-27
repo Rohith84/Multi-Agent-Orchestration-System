@@ -12,9 +12,11 @@ Provides:
 
 from __future__ import annotations
 
+import io
+import zipfile
 import uuid
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +35,57 @@ from app.services.workspace_service import WorkspaceService
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api", tags=["workspace"])
+
+
+@router.get("/workspace/export-zip")
+async def export_workspace_zip(
+    session_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """
+    Exports all active files in the workspace sandbox as a downloadable ZIP archive.
+    """
+    try:
+        sid = uuid.UUID(session_id) if session_id else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session_id format")
+
+    service = WorkspaceService(db, session_id=sid) if sid else WorkspaceService(db)
+
+    files_to_zip: dict[str, str] = {}
+
+    if service.workspace_dir.exists():
+        for file_path in service.workspace_dir.rglob("*"):
+            if file_path.is_file():
+                rel_path = file_path.relative_to(service.workspace_dir).as_posix()
+                if not rel_path.startswith(".pytest_cache") and not rel_path.startswith("__pycache__"):
+                    files_to_zip[rel_path] = file_path.read_text(encoding="utf-8", errors="replace")
+
+    if not files_to_zip and sid:
+        db_files = await service.list_files()
+        for f in db_files:
+            files_to_zip[f.file_path] = f.content
+
+    if not files_to_zip:
+        raise HTTPException(status_code=404, detail="No workspace files found for this session to export.")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for rel_path, content in files_to_zip.items():
+            zip_file.writestr(rel_path, content)
+
+    zip_buffer.seek(0)
+    filename = f"generated_code_{str(sid)[:8] if sid else 'workspace'}.zip"
+
+    return Response(
+        content=zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
 
 
 @router.get("/workspace", response_model=list[WorkspaceFileSchema])

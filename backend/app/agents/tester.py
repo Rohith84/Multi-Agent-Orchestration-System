@@ -129,7 +129,7 @@ class TesterAgent:
             }
 
         try:
-            cmd = [sys.executable, "-m", "pytest", str(sandbox_path)]
+            cmd = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", str(sandbox_path)]
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
