@@ -45,10 +45,54 @@ class PlanningMemoryStore:
     def _get_collection(self) -> Any:
         if self._collection is None:
             client = self._get_client()
-            self._collection = client.get_or_create_collection(
-                name=self.collection_name,
-                metadata={"hnsw:space": "cosine"}
-            )
+            if client is None:
+                return None
+            from app.knowledge.embeddings.generator import EmbeddingGenerator
+            generator = EmbeddingGenerator()
+            target_dim = generator.get_dimension()
+            
+            try:
+                self._collection = client.get_collection(name=self.collection_name)
+                if self._collection.count() > 0:
+                    peek_data = self._collection.peek(limit=1)
+                    embeddings = peek_data.get("embeddings")
+                    if embeddings is not None and len(embeddings) > 0:
+                        existing_dim = len(embeddings[0])
+                        if existing_dim != target_dim:
+                            logger.warning(
+                                "Dimension mismatch in Chroma DB '%s': active model expects %d, "
+                                "but existing collection has %d. Re-creating collection...",
+                                self.collection_name,
+                                target_dim,
+                                existing_dim
+                            )
+                            client.delete_collection(name=self.collection_name)
+                            self._collection = client.create_collection(
+                                name=self.collection_name,
+                                metadata={"hnsw:space": "cosine"}
+                            )
+            except Exception as e:
+                err_str = str(e).lower()
+                if "does not exist" in err_str or "not found" in err_str or "notfound" in type(e).__name__.lower():
+                    # Collection does not exist
+                    logger.info("ChromaDB collection '%s' does not exist. Creating...", self.collection_name)
+                    try:
+                        self._collection = client.create_collection(
+                            name=self.collection_name,
+                            metadata={"hnsw:space": "cosine"}
+                        )
+                    except Exception as create_err:
+                        logger.exception("Failed to create Planning Memory collection: %s", self.collection_name)
+                        self._collection = client.get_or_create_collection(
+                            name=self.collection_name,
+                            metadata={"hnsw:space": "cosine"}
+                        )
+                else:
+                    logger.exception("Failed to get/verify Planning Memory collection: %s", self.collection_name)
+                    self._collection = client.get_or_create_collection(
+                        name=self.collection_name,
+                        metadata={"hnsw:space": "cosine"}
+                    )
         return self._collection
 
     async def add_plan(

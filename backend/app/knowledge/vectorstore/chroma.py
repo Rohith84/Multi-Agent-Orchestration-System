@@ -54,18 +54,52 @@ class ChromaStore:
         return self._client
 
     def _get_collection(self) -> Any:
-        """Lazy retrieval of the vector collection."""
+        """Lazy retrieval of the vector collection with dimension compatibility check."""
         if self._collection is None:
             client = self._get_client()
+            from app.knowledge.embeddings.generator import EmbeddingGenerator
+            generator = EmbeddingGenerator()
+            target_dim = generator.get_dimension()
+            
             try:
-                # Using cosine distance
-                self._collection = client.get_or_create_collection(
-                    name=self.collection_name,
-                    metadata={"hnsw:space": "cosine"}
-                )
+                # Try to get the collection first
+                self._collection = client.get_collection(name=self.collection_name)
+                
+                # Check for dimension mismatch if collection contains elements
+                if self._collection.count() > 0:
+                    peek_data = self._collection.peek(limit=1)
+                    embeddings = peek_data.get("embeddings")
+                    if embeddings is not None and len(embeddings) > 0:
+                        existing_dim = len(embeddings[0])
+                        if existing_dim != target_dim:
+                            logger.warning(
+                                "Dimension mismatch in Chroma DB '%s': active model expects %d, "
+                                "but existing collection has %d. Re-creating collection...",
+                                self.collection_name,
+                                target_dim,
+                                existing_dim
+                            )
+                            client.delete_collection(name=self.collection_name)
+                            self._collection = client.create_collection(
+                                name=self.collection_name,
+                                metadata={"hnsw:space": "cosine"}
+                            )
             except Exception as e:
-                logger.exception("Failed to get or create ChromaDB collection: %s", self.collection_name)
-                raise VectorDBUnavailableError(f"Failed to access ChromaDB collection: {e}") from e
+                err_str = str(e).lower()
+                if "does not exist" in err_str or "not found" in err_str or "notfound" in type(e).__name__.lower():
+                    # Collection does not exist yet
+                    logger.info("ChromaDB collection '%s' does not exist. Creating...", self.collection_name)
+                    try:
+                        self._collection = client.create_collection(
+                            name=self.collection_name,
+                            metadata={"hnsw:space": "cosine"}
+                        )
+                    except Exception as create_err:
+                        logger.exception("Failed to create ChromaDB collection: %s", self.collection_name)
+                        raise VectorDBUnavailableError(f"Failed to create ChromaDB collection: {create_err}") from create_err
+                else:
+                    logger.exception("Failed to get or create ChromaDB collection: %s", self.collection_name)
+                    raise VectorDBUnavailableError(f"Failed to access ChromaDB collection: {e}") from e
         return self._collection
 
     def add_chunks(

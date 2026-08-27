@@ -51,6 +51,7 @@ class Settings(BaseSettings):
 
     # RAG Settings
     vector_db_path: str = "chroma_db"
+    embedding_provider: str = "fastembed"
     embedding_model: str = "nomic-embed-text"
 
     # AI Assistant

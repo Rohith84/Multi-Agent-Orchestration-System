@@ -8,7 +8,7 @@ from app.orchestration.workflow import WorkflowExecutor
 from app.repositories.workflow_repository import WorkflowRepository
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="module")
 async def test_phase1_workflow_execution():
     """
     Integration test for Phase 1 core workflow reliability:
@@ -16,6 +16,10 @@ async def test_phase1_workflow_execution():
     2. Resuming execution from checkpoint
     3. Workspace directory creation and isolation
     """
+    # Dispose of old connection pool to prevent closed event loop errors
+    from app.db.database import engine
+    await engine.dispose()
+
     # Ensure database schema is initialized
     await init_db()
 
