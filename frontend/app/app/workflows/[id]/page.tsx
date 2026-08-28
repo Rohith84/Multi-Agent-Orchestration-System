@@ -168,9 +168,14 @@ export default function WorkflowExecutionPage({
     setIsStreaming(true);
     try {
       const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
       const response = await fetch(`${API_URL}/api/workflows/${workflowId}/resume`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
       });
 
       if (!response.ok) throw new Error(`HTTP error: ${response.status}`);

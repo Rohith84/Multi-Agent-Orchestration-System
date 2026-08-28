@@ -66,6 +66,7 @@ class OllamaClient:
             "model": model,
             "messages": messages,
             "temperature": 0.2,
+            "max_tokens": 8192,
         }
 
         logger.info(
@@ -107,8 +108,8 @@ class OllamaClient:
             "keep_alive": "15m",
             "options": {
                 "num_gpu": 99,
-                "num_ctx": 2048,
-                "num_predict": 512,
+                "num_ctx": 8192,
+                "num_predict": 4096,
                 "temperature": 0.2,
             },
         }

@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.models.metrics import AgentMetric, WorkflowMetric
 from app.models.workflow import Workflow, WorkflowCheckpoint, WorkflowApproval
 from app.models.tool_execution import ToolExecution
+from app.models.workspace import QualityReport
 from app.schemas.analytics import (
     DashboardAnalyticsResponse,
     ModelPerformanceStats,
@@ -44,22 +45,37 @@ class AnalyticsService:
         wf_count_res = await self.db.execute(select(func.count(Workflow.id)))
         total_workflows = wf_count_res.scalar() or 0
 
-        avg_lat_res = await self.db.execute(select(func.avg(WorkflowMetric.total_duration)))
-        avg_wf_latency = round(avg_lat_res.scalar() or 0.0, 2)
+        avg_lat_res = await self.db.execute(
+            select(func.avg(Workflow.execution_time)).where(Workflow.status == "completed")
+        )
+        avg_wf_latency = avg_lat_res.scalar()
+        if avg_wf_latency is not None:
+            avg_wf_latency = round(float(avg_wf_latency), 2)
 
         # 2. Total tokens and overall score
-        tot_tok_res = await self.db.execute(select(func.sum(WorkflowMetric.total_tokens)))
-        total_tokens = tot_tok_res.scalar() or 0
+        total_tokens = None  # Token usage not tracked by provider integrations
 
-        avg_score_res = await self.db.execute(select(func.avg(WorkflowMetric.overall_score)))
-        overall_score = round(avg_score_res.scalar() or 8.8, 1)
+        avg_score_res = await self.db.execute(select(func.avg(QualityReport.overall_score)))
+        overall_score = avg_score_res.scalar()
+        if overall_score is not None:
+            overall_score = round(float(overall_score), 1)
 
         # 3. Success rate
         success_wf_res = await self.db.execute(
             select(func.count(Workflow.id)).where(Workflow.status == "completed")
         )
         success_count = success_wf_res.scalar() or 0
-        success_rate = round((success_count / max(1, total_workflows)) * 100, 1)
+
+        failed_wf_res = await self.db.execute(
+            select(func.count(Workflow.id)).where(Workflow.status == "failed")
+        )
+        failed_count = failed_wf_res.scalar() or 0
+
+        total_completed_or_failed = success_count + failed_count
+        if total_completed_or_failed > 0:
+            success_rate = round((success_count / total_completed_or_failed) * 100, 1)
+        else:
+            success_rate = None
 
         # 4. Model stats comparison
         model_stats = await self._compute_model_stats()
@@ -86,6 +102,8 @@ class AnalyticsService:
             tool_stats=tool_stats,
             rag_stats=rag_stats,
             recent_agent_metrics=recent_metrics,
+            token_usage_available=False,
+            rag_metrics_available=False,
         )
 
     async def export_report(self, format_type: str = "json") -> str:
@@ -128,6 +146,7 @@ class AnalyticsService:
 
     async def _compute_model_stats(self) -> list[ModelPerformanceStats]:
         """Group performance metrics by LLM model."""
+        from sqlalchemy import case
         res = await self.db.execute(
             select(
                 AgentMetric.model,
@@ -135,61 +154,52 @@ class AnalyticsService:
                 func.avg(AgentMetric.duration),
                 func.avg(AgentMetric.total_tokens),
                 func.avg(AgentMetric.score),
+                func.sum(case((AgentMetric.status == "success", 1), else_=0)),
             ).group_by(AgentMetric.model)
         )
         stats = []
         for row in res.fetchall():
-            model_name, count, avg_dur, avg_tok, avg_sc = row
+            model_name, count, avg_dur, avg_tok, avg_sc, success_count = row
+            success_count = success_count or 0
+            success_rate = round((success_count / max(1, count)) * 100, 1)
             stats.append(ModelPerformanceStats(
                 model_name=model_name,
                 total_calls=count,
                 avg_duration=round(avg_dur or 0.0, 2),
                 avg_tokens=round(avg_tok or 0.0, 0),
                 avg_score=round(avg_sc or 8.5, 1),
-                success_rate=98.0,
+                success_rate=success_rate,
             ))
-        if not stats:
-            # Default comparison baseline if no data recorded yet
-            stats = [
-                ModelPerformanceStats(model_name="llama3.1:8b", total_calls=12, avg_duration=2.4, avg_tokens=420, avg_score=8.8, success_rate=100.0),
-                ModelPerformanceStats(model_name="qwen2.5-coder:7b", total_calls=18, avg_duration=1.9, avg_tokens=550, avg_score=9.1, success_rate=95.0),
-            ]
         return stats
 
     async def _compute_tool_stats(self) -> list[ToolPerformanceStats]:
         """Group performance metrics by MCP tool."""
+        from sqlalchemy import case
         res = await self.db.execute(
             select(
                 ToolExecution.tool_name,
                 func.count(ToolExecution.id),
                 func.avg(ToolExecution.execution_time),
+                func.sum(case((ToolExecution.status == "success", 1), else_=0)),
             ).group_by(ToolExecution.tool_name)
         )
         stats = []
         for row in res.fetchall():
-            t_name, count, avg_dur = row
+            t_name, count, avg_dur, success_count = row
+            success_count = success_count or 0
+            success_rate = round((success_count / max(1, count)) * 100, 1)
+            failure_count = count - success_count
             cat = t_name.split(".")[0] if "." in t_name else "general"
             stats.append(ToolPerformanceStats(
                 tool_name=t_name,
                 category=cat,
                 total_calls=count,
                 avg_duration=round(avg_dur or 0.0, 3),
-                success_rate=100.0,
-                failure_count=0,
+                success_rate=success_rate,
+                failure_count=failure_count,
             ))
-        if not stats:
-            stats = [
-                ToolPerformanceStats(tool_name="filesystem.list_directory", category="filesystem", total_calls=15, avg_duration=0.04, success_rate=100.0, failure_count=0),
-                ToolPerformanceStats(tool_name="postgres.execute_query", category="database", total_calls=8, avg_duration=0.12, success_rate=100.0, failure_count=0),
-                ToolPerformanceStats(tool_name="github.list_commits", category="github", total_calls=5, avg_duration=0.45, success_rate=100.0, failure_count=0),
-            ]
         return stats
 
-    async def _compute_rag_stats(self) -> RAGPerformanceStats:
-        """Compute RAG retrieval analytics."""
-        return RAGPerformanceStats(
-            total_queries=24,
-            avg_retrieval_latency=0.18,
-            avg_similarity_score=0.86,
-            total_chunks_retrieved=98,
-        )
+    async def _compute_rag_stats(self) -> RAGPerformanceStats | None:
+        """Compute RAG retrieval analytics. Returns None as RAG query telemetry is not tracked."""
+        return None

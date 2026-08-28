@@ -6,6 +6,7 @@ Performs static code analysis (Ruff check, Bandit security scan), evaluates arch
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import time
 from typing import TYPE_CHECKING, Any
@@ -54,7 +55,10 @@ class ReviewerAgent:
         ruff_findings = await self._run_linter_cmd([sys.executable, "-m", "ruff", "check", "--no-cache", str(target_dir)])
         bandit_findings = await self._run_linter_cmd([sys.executable, "-m", "bandit", "-r", str(target_dir)])
 
-        # 2. Perform LLM Architectural Review
+        # 2. Build structured per-file code section for the LLM
+        code_section = self._extract_files_summary(generated_code)
+
+        # 3. Perform LLM Architectural Review
         system_prompt = (
             "You are the Reviewer Agent in a multi-agent orchestration system.\n\n"
             "## Role\n"
@@ -65,6 +69,8 @@ class ReviewerAgent:
             "- Review architecture: Is the code well-structured, maintainable, and consistent with the project?\n"
             "- Review security: Are there vulnerabilities, injection risks, or unsafe patterns?\n"
             "- Review code quality: Does the code follow SOLID principles, handle errors, and avoid anti-patterns?\n"
+            "- Review file completeness: Are ALL files from the plan manifest present and syntactically complete?\n"
+            "  Check that no file is cut off mid-line, that all imports are valid, and that all referenced files exist.\n"
             "- Assess test results: Did the Testing Agent's actual execution results confirm correctness?\n"
             "- Consider static analysis results (Ruff linter, Bandit security scanner) as additional evidence.\n"
             "- Identify unresolved risks from earlier agents.\n\n"
@@ -91,15 +97,15 @@ class ReviewerAgent:
             "Base your final status on evidence, not optimism."
         )
 
-        # Truncate inputs to prevent Ollama OOM on large codebases
+        # Truncate inputs — but code section uses structured per-file approach
         prompt = (
-            f"User Request:\n{user_request[:500]}\n\n"
-            f"Execution Plan:\n{execution_plan[:800]}\n\n"
-            f"Research Notes:\n{research_notes[:500]}\n\n"
-            f"Generated Code:\n{generated_code[:2000]}\n\n"
-            f"Test Results:\n{test_results[:800]}\n\n"
-            f"Static Linter (Ruff):\n{ruff_findings[:500]}\n\n"
-            f"Security Scanner (Bandit):\n{bandit_findings[:500]}\n\n"
+            f"User Request:\n{user_request[:800]}\n\n"
+            f"Execution Plan:\n{execution_plan[:1500]}\n\n"
+            f"Research Notes:\n{research_notes[:800]}\n\n"
+            f"{code_section}\n\n"
+            f"Test Results:\n{test_results[:1500]}\n\n"
+            f"Static Linter (Ruff):\n{ruff_findings[:600]}\n\n"
+            f"Security Scanner (Bandit):\n{bandit_findings[:600]}\n\n"
             "Please deliver the architectural review, quality score out of 100, and final summary."
         )
 
@@ -122,21 +128,78 @@ class ReviewerAgent:
         elif "warning" in ruff_findings.lower() or "medium" in bandit_findings.lower():
             quality_gate = "PASS_WITH_WARNINGS"
 
+        # Parse dynamic score from LLM output
+        overall_score = self._parse_quality_score(llm_review, quality_gate)
+
         text_output = (
             f"{llm_review}\n\n"
             f"--- STATIC CODE ANALYSIS & QUALITY GATE ---\n"
             f"Quality Gate: {quality_gate}\n"
-            f"Ruff Linter Report:\n{ruff_findings[:400] if ruff_findings else 'No linter issues.'}\n\n"
-            f"Bandit Security Report:\n{bandit_findings[:400] if bandit_findings else 'No security issues found.'}\n"
+            f"Ruff Linter Report:\n{ruff_findings[:600] if ruff_findings else 'No linter issues.'}\n\n"
+            f"Bandit Security Report:\n{bandit_findings[:600] if bandit_findings else 'No security issues found.'}\n"
         )
 
         return {
             "output": text_output,
             "quality_gate": quality_gate,
-            "overall_score": 92.0 if quality_gate != "FAIL" else 65.0,
+            "overall_score": overall_score,
             "lint_findings": [{"tool": "ruff", "output": ruff_findings[:1000]}],
             "security_findings": [{"tool": "bandit", "output": bandit_findings[:1000]}],
         }
+
+    def _extract_files_summary(self, generated_code: str, max_per_file: int = 1500) -> str:
+        """Parse code blocks into per-file summaries for structured review."""
+        pattern = r"```([a-zA-Z0-9_-]*)\s+(?:filepath|file)=[\"']?([^\"'\s\n>]+)[\"']?\n(.*?)```"
+        matches = re.findall(pattern, generated_code, re.DOTALL)
+
+        if not matches:
+            # Fallback: no annotated blocks, show raw truncated
+            return f"Generated Code (raw, no annotated file blocks found):\n{generated_code[:3000]}\n"
+
+        sections: list[str] = []
+        sections.append(f"**File Manifest** ({len(matches)} files generated):")
+        for lang, path, _ in matches:
+            sections.append(f"  - `{path}` ({lang or 'text'})")
+        sections.append("")
+
+        for lang, path, content in matches:
+            lines = content.strip().splitlines()
+            line_count = len(lines)
+            truncated = content.strip()[:max_per_file]
+            was_cut = len(content.strip()) > max_per_file
+            sections.append(
+                f"### File: `{path}` ({line_count} lines, {lang or 'text'})\n"
+                f"```{lang or 'text'}\n{truncated}\n```"
+                + ("\n*(truncated — file continues)*" if was_cut else "")
+            )
+
+        return "\n\n".join(sections)
+
+    def _parse_quality_score(self, llm_review: str, quality_gate: str) -> float:
+        """
+        Parse the Quality Score from the LLM's review text.
+        Falls back to gate-based defaults if no score is found.
+        """
+        # Try patterns like "Quality Score: 75/100", "Score: 80 / 100", "**Quality Score**: 65/100"
+        patterns = [
+            r"[Qq]uality\s*[Ss]core[:\s]*\**\s*(\d{1,3})\s*/\s*100",
+            r"[Ss]core[:\s]*\**\s*(\d{1,3})\s*/\s*100",
+            r"[Qq]uality\s*[Ss]core[:\s]*\**\s*(\d{1,3})",
+            r"\*\*(\d{1,3})\s*/\s*100\*\*",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, llm_review)
+            if match:
+                score = float(match.group(1))
+                if 0 <= score <= 100:
+                    return score
+
+        # Fallback defaults based on quality gate
+        if quality_gate == "FAIL":
+            return 45.0
+        elif quality_gate == "PASS_WITH_WARNINGS":
+            return 72.0
+        return 85.0
 
     async def _run_linter_cmd(self, cmd: list[str], timeout: float = 30.0) -> str:
         """Run linter CLI command asynchronously with a timeout."""

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.core.logging import get_logger
+from app.core.auth import get_current_user
 from app.schemas.analytics import DashboardAnalyticsResponse
 from app.services.analytics_service import AnalyticsService
 
@@ -29,6 +30,7 @@ def _get_analytics_service(db: AsyncSession = Depends(get_db)) -> AnalyticsServi
 @router.get("/dashboard", response_model=DashboardAnalyticsResponse)
 async def get_dashboard_analytics(
     service: AnalyticsService = Depends(_get_analytics_service),
+    current_user: dict = Depends(get_current_user),
 ) -> DashboardAnalyticsResponse:
     """
     Get aggregated system analytics, token usage, LLM model performance comparison, tool metrics, and evaluation quality scores.
@@ -40,6 +42,7 @@ async def get_dashboard_analytics(
 async def export_analytics_report(
     format: str = Query(default="json", description="Export format: 'json' or 'csv'"),
     service: AnalyticsService = Depends(_get_analytics_service),
+    current_user: dict = Depends(get_current_user),
 ) -> PlainTextResponse:
     """
     Export metrics observability report as JSON or CSV string.

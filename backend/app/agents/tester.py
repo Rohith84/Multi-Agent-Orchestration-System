@@ -108,12 +108,18 @@ class TesterAgent:
         bug_report = None
 
         if not passed:
+            # Parse specific error info from pytest output for better repair hints
+            combined_output = (test_run_res["stderr"] or "") + (test_run_res["stdout"] or "")
+            error_category = self._classify_error(combined_output)
+            failed_test = self._extract_failed_test(combined_output)
+            suggested_fix = self._build_suggested_fix(error_category, combined_output)
+
             bug_report = {
                 "failed_file": str((workspace_service.workspace_dir if workspace_service else SANDBOX_DIR) / "main.py"),
-                "failed_test": "test_suite.py",
-                "stack_trace": test_run_res["stderr"] or test_run_res["stdout"],
-                "error_category": "AssertionError",
-                "suggested_fix": "Fix implementation logic based on captured test output.",
+                "failed_test": failed_test,
+                "stack_trace": combined_output[:1500],
+                "error_category": error_category,
+                "suggested_fix": suggested_fix,
                 "severity": "HIGH",
             }
 
@@ -169,3 +175,65 @@ class TesterAgent:
                 "execution_time": 0.1,
                 "timeout_triggered": False,
             }
+
+    @staticmethod
+    def _classify_error(output: str) -> str:
+        """Classify the primary error type from pytest output."""
+        error_patterns = [
+            ("SyntaxError", "SyntaxError"),
+            ("ModuleNotFoundError", "ModuleNotFoundError"),
+            ("ImportError", "ImportError"),
+            ("NameError", "NameError"),
+            ("TypeError", "TypeError"),
+            ("AttributeError", "AttributeError"),
+            ("FileNotFoundError", "FileNotFoundError"),
+            ("AssertionError", "AssertionError"),
+            ("AssertionError", "AssertionError"),
+            ("ValueError", "ValueError"),
+            ("KeyError", "KeyError"),
+        ]
+        for pattern, category in error_patterns:
+            if pattern in output:
+                return category
+        if "FAILED" in output:
+            return "TestFailure"
+        if "ERROR" in output:
+            return "RuntimeError"
+        return "Unknown"
+
+    @staticmethod
+    def _extract_failed_test(output: str) -> str:
+        """Extract the name of the first failing test from pytest output."""
+        # Match patterns like "FAILED test_file.py::test_name"
+        match = re.search(r"FAILED\s+([\w/\\.-]+(?:::[\w]+)?)", output)
+        if match:
+            return match.group(1)
+        # Match patterns like "ERROR test_file.py"
+        match = re.search(r"ERROR\s+([\w/\\.-]+)", output)
+        if match:
+            return match.group(1)
+        return "test_suite.py"
+
+    @staticmethod
+    def _build_suggested_fix(error_category: str, output: str) -> str:
+        """Build a specific fix suggestion based on error type."""
+        suggestions = {
+            "SyntaxError": "Fix the syntax error — check for unclosed brackets, missing colons, or incomplete statements near the reported line.",
+            "ModuleNotFoundError": "Install the missing module or fix the import path. Ensure all dependencies are listed in requirements.txt.",
+            "ImportError": "Fix the import — the referenced name may not exist in the module, or the module structure may be incorrect.",
+            "NameError": "A variable or function is referenced before being defined. Check for typos or missing imports.",
+            "TypeError": "A function is being called with wrong argument types or count. Check the function signature.",
+            "AttributeError": "An object doesn't have the referenced attribute. Check the class definition or object type.",
+            "FileNotFoundError": "A file path referenced in the code does not exist. Check file paths and ensure all required files are generated.",
+            "AssertionError": "A test assertion failed — the actual output doesn't match the expected value. Fix the implementation logic.",
+            "ValueError": "An invalid value was passed. Check input validation and type conversions.",
+            "KeyError": "A dictionary key was not found. Ensure all expected keys exist in the data structure.",
+        }
+        base = suggestions.get(error_category, "Fix the implementation based on the test output above.")
+
+        # Try to extract the specific error message for more context
+        match = re.search(rf"{error_category}:\s*(.+?)(?:\n|$)", output)
+        if match:
+            base += f" Specific error: {match.group(1).strip()[:200]}"
+
+        return base

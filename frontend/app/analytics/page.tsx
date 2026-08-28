@@ -217,7 +217,13 @@ export default function AnalyticsPage() {
                     <Sparkles className="h-4 w-4 text-emerald-400" />
                   </div>
                   <div className="text-3xl font-extrabold text-white">
-                    {analytics.overall_quality_score} <span className="text-sm font-normal text-zinc-500">/ 10</span>
+                    {analytics.overall_quality_score !== null && analytics.overall_quality_score !== undefined ? (
+                      <>
+                        {analytics.overall_quality_score} <span className="text-sm font-normal text-zinc-500">/ 10</span>
+                      </>
+                    ) : (
+                      "N/A"
+                    )}
                   </div>
                   <p className="text-[11px] text-emerald-400 mt-1">LLM-as-a-Judge Evaluation</p>
                 </div>
@@ -228,9 +234,15 @@ export default function AnalyticsPage() {
                     <Zap className="h-4 w-4 text-amber-400" />
                   </div>
                   <div className="text-3xl font-extrabold text-white">
-                    {analytics.total_tokens_consumed.toLocaleString()}
+                    {analytics.total_tokens_consumed !== null && analytics.total_tokens_consumed !== undefined ? (
+                      analytics.total_tokens_consumed.toLocaleString()
+                    ) : (
+                      "N/A"
+                    )}
                   </div>
-                  <p className="text-[11px] text-zinc-500 mt-1">Estimated input + output tokens</p>
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    {analytics.token_usage_available ? "Estimated input + output tokens" : "Token usage untracked"}
+                  </p>
                 </div>
 
                 <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-sm">
@@ -239,7 +251,11 @@ export default function AnalyticsPage() {
                     <Clock className="h-4 w-4 text-indigo-400" />
                   </div>
                   <div className="text-3xl font-extrabold text-white">
-                    {analytics.avg_workflow_latency}s
+                    {analytics.avg_workflow_latency !== null && analytics.avg_workflow_latency !== undefined ? (
+                      `${analytics.avg_workflow_latency}s`
+                    ) : (
+                      "N/A"
+                    )}
                   </div>
                   <p className="text-[11px] text-zinc-500 mt-1">Per completed workflow</p>
                 </div>
@@ -250,7 +266,11 @@ export default function AnalyticsPage() {
                     <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                   </div>
                   <div className="text-3xl font-extrabold text-white">
-                    {analytics.success_rate_percentage}%
+                    {analytics.success_rate_percentage !== null && analytics.success_rate_percentage !== undefined ? (
+                      `${analytics.success_rate_percentage}%`
+                    ) : (
+                      "N/A"
+                    )}
                   </div>
                   <p className="text-[11px] text-emerald-400 mt-1">{analytics.total_workflows_executed} Workflows Executed</p>
                 </div>
@@ -262,32 +282,40 @@ export default function AnalyticsPage() {
                   Recent Agent Performance Traces
                 </h3>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-zinc-800 text-zinc-500 uppercase tracking-wider">
-                        <th className="pb-3">Agent</th>
-                        <th className="pb-3">Model</th>
-                        <th className="pb-3">Duration</th>
-                        <th className="pb-3">Tokens</th>
-                        <th className="pb-3">Tools</th>
-                        <th className="pb-3">Judge Score</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-800/60 text-zinc-300">
-                      {analytics.recent_agent_metrics.map((m) => (
-                        <tr key={m.id} className="hover:bg-zinc-800/30">
-                          <td className="py-3 font-semibold capitalize text-white">{m.agent_name}</td>
-                          <td className="py-3 font-mono text-indigo-300">{m.model}</td>
-                          <td className="py-3">{m.duration}s</td>
-                          <td className="py-3 font-mono">{m.total_tokens}</td>
-                          <td className="py-3">{m.tool_calls}</td>
-                          <td className="py-3 font-bold text-emerald-400">{m.score} / 10</td>
+                {analytics.recent_agent_metrics.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-zinc-500">
+                    No recent agent performance traces available.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-zinc-800 text-zinc-500 uppercase tracking-wider">
+                          <th className="pb-3">Agent</th>
+                          <th className="pb-3">Model</th>
+                          <th className="pb-3">Duration</th>
+                          <th className="pb-3">Tokens</th>
+                          <th className="pb-3">Tools</th>
+                          <th className="pb-3">Judge Score</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800/60 text-zinc-300">
+                        {analytics.recent_agent_metrics.map((m) => (
+                          <tr key={m.id} className="hover:bg-zinc-800/30">
+                            <td className="py-3 font-semibold capitalize text-white">{m.agent_name}</td>
+                            <td className="py-3 font-mono text-indigo-300">{m.model}</td>
+                            <td className="py-3">{m.duration}s</td>
+                            <td className="py-3 font-mono">
+                              {analytics.token_usage_available && m.total_tokens !== 0 ? m.total_tokens : "N/A"}
+                            </td>
+                            <td className="py-3">{m.tool_calls}</td>
+                            <td className="py-3 font-bold text-emerald-400">{m.score} / 10</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -299,33 +327,41 @@ export default function AnalyticsPage() {
                 LLM Model Benchmarking & Speed Comparison
               </h2>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {analytics.model_stats.map((m) => (
-                  <div key={m.model_name} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 backdrop-blur-sm space-y-4">
-                    <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-                      <span className="text-base font-bold text-white font-mono">{m.model_name}</span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                        {m.total_calls} Calls
-                      </span>
-                    </div>
+              {analytics.model_stats.length === 0 ? (
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-8 text-center text-sm text-zinc-500">
+                  No LLM model performance data recorded yet. Run a workflow to populate registry telemetry.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {analytics.model_stats.map((m) => (
+                    <div key={m.model_name} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 backdrop-blur-sm space-y-4">
+                      <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                        <span className="text-base font-bold text-white font-mono">{m.model_name}</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                          {m.total_calls} Calls
+                        </span>
+                      </div>
 
-                    <div className="grid grid-cols-3 gap-4 text-center">
-                      <div className="bg-zinc-950/60 p-3 rounded-lg border border-zinc-800">
-                        <div className="text-[10px] text-zinc-500 uppercase">Avg Speed</div>
-                        <div className="text-lg font-bold text-white mt-1">{m.avg_duration}s</div>
-                      </div>
-                      <div className="bg-zinc-950/60 p-3 rounded-lg border border-zinc-800">
-                        <div className="text-[10px] text-zinc-500 uppercase">Avg Tokens</div>
-                        <div className="text-lg font-bold text-white mt-1">{m.avg_tokens}</div>
-                      </div>
-                      <div className="bg-zinc-950/60 p-3 rounded-lg border border-zinc-800">
-                        <div className="text-[10px] text-zinc-500 uppercase">Quality Score</div>
-                        <div className="text-lg font-bold text-emerald-400 mt-1">{m.avg_score} / 10</div>
+                      <div className="grid grid-cols-3 gap-4 text-center">
+                        <div className="bg-zinc-950/60 p-3 rounded-lg border border-zinc-800">
+                          <div className="text-[10px] text-zinc-500 uppercase">Avg Speed</div>
+                          <div className="text-lg font-bold text-white mt-1">{m.avg_duration}s</div>
+                        </div>
+                        <div className="bg-zinc-950/60 p-3 rounded-lg border border-zinc-800">
+                          <div className="text-[10px] text-zinc-500 uppercase">Avg Tokens</div>
+                          <div className="text-lg font-bold text-white mt-1">
+                            {analytics.token_usage_available ? m.avg_tokens : "N/A"}
+                          </div>
+                        </div>
+                        <div className="bg-zinc-950/60 p-3 rounded-lg border border-zinc-800">
+                          <div className="text-[10px] text-zinc-500 uppercase">Quality Score</div>
+                          <div className="text-lg font-bold text-emerald-400 mt-1">{m.avg_score} / 10</div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -338,24 +374,30 @@ export default function AnalyticsPage() {
                   <Database className="h-4 w-4 text-indigo-400" /> RAG Search & Vectorstore Analytics
                 </h3>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-                  <div className="bg-zinc-950/60 p-4 rounded-lg border border-zinc-800">
-                    <div className="text-xs text-zinc-500 uppercase">Total Queries</div>
-                    <div className="text-xl font-bold text-white mt-1">{analytics.rag_stats.total_queries}</div>
+                {!analytics.rag_metrics_available || !analytics.rag_stats ? (
+                  <div className="py-8 text-center text-xs text-zinc-500">
+                    RAG query telemetry is currently untracked.
                   </div>
-                  <div className="bg-zinc-950/60 p-4 rounded-lg border border-zinc-800">
-                    <div className="text-xs text-zinc-500 uppercase">Avg Retrieval Latency</div>
-                    <div className="text-xl font-bold text-indigo-300 mt-1">{analytics.rag_stats.avg_retrieval_latency}s</div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+                    <div className="bg-zinc-950/60 p-4 rounded-lg border border-zinc-800">
+                      <div className="text-xs text-zinc-500 uppercase">Total Queries</div>
+                      <div className="text-xl font-bold text-white mt-1">{analytics.rag_stats.total_queries}</div>
+                    </div>
+                    <div className="bg-zinc-950/60 p-4 rounded-lg border border-zinc-800">
+                      <div className="text-xs text-zinc-500 uppercase">Avg Retrieval Latency</div>
+                      <div className="text-xl font-bold text-indigo-300 mt-1">{analytics.rag_stats.avg_retrieval_latency}s</div>
+                    </div>
+                    <div className="bg-zinc-950/60 p-4 rounded-lg border border-zinc-800">
+                      <div className="text-xs text-zinc-500 uppercase">Avg Similarity Score</div>
+                      <div className="text-xl font-bold text-emerald-400 mt-1">{analytics.rag_stats.avg_similarity_score}</div>
+                    </div>
+                    <div className="bg-zinc-950/60 p-4 rounded-lg border border-zinc-800">
+                      <div className="text-xs text-zinc-500 uppercase">Chunks Retrieved</div>
+                      <div className="text-xl font-bold text-white mt-1">{analytics.rag_stats.total_chunks_retrieved}</div>
+                    </div>
                   </div>
-                  <div className="bg-zinc-950/60 p-4 rounded-lg border border-zinc-800">
-                    <div className="text-xs text-zinc-500 uppercase">Avg Similarity Score</div>
-                    <div className="text-xl font-bold text-emerald-400 mt-1">{analytics.rag_stats.avg_similarity_score}</div>
-                  </div>
-                  <div className="bg-zinc-950/60 p-4 rounded-lg border border-zinc-800">
-                    <div className="text-xs text-zinc-500 uppercase">Chunks Retrieved</div>
-                    <div className="text-xl font-bold text-white mt-1">{analytics.rag_stats.total_chunks_retrieved}</div>
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* MCP Tools Stats */}
@@ -364,19 +406,25 @@ export default function AnalyticsPage() {
                   <Wrench className="h-4 w-4 text-orange-400" /> MCP Tool Invocation Metrics
                 </h3>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {analytics.tool_stats.map((t) => (
-                    <div key={t.tool_name} className="p-4 rounded-lg bg-zinc-950/60 border border-zinc-800 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono font-semibold text-orange-300">{t.tool_name}</span>
-                        <span className="text-[10px] text-emerald-400 font-bold">{t.success_rate}% Success</span>
+                {analytics.tool_stats.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-zinc-500">
+                    No MCP tool calls recorded yet.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {analytics.tool_stats.map((t) => (
+                      <div key={t.tool_name} className="p-4 rounded-lg bg-zinc-950/60 border border-zinc-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-mono font-semibold text-orange-300">{t.tool_name}</span>
+                          <span className="text-[10px] text-emerald-400 font-bold">{t.success_rate}% Success</span>
+                        </div>
+                        <div className="text-xs text-zinc-400">
+                          Calls: <span className="text-white font-bold">{t.total_calls}</span> | Avg Duration: <span className="text-white font-bold">{t.avg_duration}s</span>
+                        </div>
                       </div>
-                      <div className="text-xs text-zinc-400">
-                        Calls: <span className="text-white font-bold">{t.total_calls}</span> | Avg Duration: <span className="text-white font-bold">{t.avg_duration}s</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

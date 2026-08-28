@@ -7,44 +7,23 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
-import { Bot, Plus, Trash2, Cpu, Download } from "lucide-react";
+import { Bot, Plus, Trash2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import api from "@/lib/api";
 
 interface ChatHeaderProps {
   sessionId: string | null;
   onNewChat: () => void;
   onClearChat: () => void;
+  showExport?: boolean;
 }
 
 export function ChatHeader({
   sessionId,
   onNewChat,
   onClearChat,
+  showExport = false,
 }: ChatHeaderProps) {
-  const [ollamaProcessor, setOllamaProcessor] = useState<string>("checking...");
-
-  useEffect(() => {
-    let active = true;
-    const checkRuntime = async () => {
-      try {
-        const { data } = await api.get("/api/ollama/runtime");
-        if (active) {
-          setOllamaProcessor(data.processor || "unknown");
-        }
-      } catch {
-        if (active) setOllamaProcessor("unknown");
-      }
-    };
-    checkRuntime();
-    const interval = setInterval(checkRuntime, 10000);
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, []);
 
   const handleExportZip = () => {
     if (!sessionId) return;
@@ -88,31 +67,12 @@ export function ChatHeader({
             >
               Multi-Agent Graph
             </Badge>
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1.5 py-0 border font-mono font-bold flex items-center gap-1"
-              style={{
-                borderColor: "var(--border-primary)",
-                background: ollamaProcessor.includes("GPU") ? "var(--accent-lime, #a3e635)" : "var(--bg-secondary)",
-                color: ollamaProcessor.includes("GPU") ? "#000000" : "var(--fg-primary)",
-              }}
-            >
-              <Cpu className="h-3 w-3" /> Ollama: {ollamaProcessor.toUpperCase()}
-            </Badge>
-            {sessionId && (
-              <span
-                className="text-[10px] font-mono font-bold"
-                style={{ color: "var(--fg-tertiary)" }}
-              >
-                {sessionId.slice(0, 8)}…
-              </span>
-            )}
           </div>
         </div>
       </div>
 
       <div className="flex items-center gap-2">
-        {sessionId && (
+        {sessionId && showExport && (
           <Button
             id="export-zip-btn"
             variant="outline"

@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   CheckCircle2,
   XCircle,
@@ -31,6 +31,19 @@ const AGENTS_LIST = ["planner", "research", "coder", "tester", "reviewer"];
 
 export function AgentTimeline({ executions, activeAgent }: AgentTimelineProps) {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const [runningSeconds, setRunningSeconds] = useState<number>(0);
+
+  useEffect(() => {
+    if (!activeAgent) {
+      setRunningSeconds(0);
+      return;
+    }
+    setRunningSeconds(0);
+    const interval = setInterval(() => {
+      setRunningSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeAgent]);
 
   const toggleExpand = (agent: string) => {
     setExpandedAgent((prev) => (prev === agent ? null : agent));
@@ -153,27 +166,41 @@ export function AgentTimeline({ executions, activeAgent }: AgentTimelineProps) {
                     >
                       {getAgentLabel(agent)}
                     </h3>
-                    {state.executionTime > 0 && (
-                      <div
-                        className="flex items-center gap-1 mt-0.5 text-[10px] font-mono font-bold"
-                        style={{ color: "var(--fg-secondary)" }}
-                      >
-                        <Clock className="h-3 w-3" />
-                        {state.executionTime}s
+                    {agent === "coder" && (state.status === "success" || state.status === "running") && (
+                      <div className="flex items-center gap-1 text-[10px] font-mono text-emerald-400/90 mt-0.5">
+                        <span className="font-bold">✓</span> Quality validation
                       </div>
                     )}
                   </div>
                 </div>
 
-                {state.output && (
-                  <div>
-                    {isExpanded ? (
-                      <ChevronUp className="h-4 w-4 text-zinc-500" />
-                    ) : (
-                      <ChevronDown className="h-4 w-4 text-zinc-500" />
-                    )}
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  {(state.status === "running" || state.status === "retrying") && activeAgent === agent ? (
+                    <div
+                      className="flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-violet-950/40 border border-violet-800/40 text-violet-300 animate-pulse"
+                    >
+                      <Clock className="h-3 w-3 text-violet-400 animate-spin" />
+                      {runningSeconds}s
+                    </div>
+                  ) : state.executionTime > 0 ? (
+                    <div
+                      className="flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700/50"
+                    >
+                      <Clock className="h-3 w-3 text-zinc-400" />
+                      {state.executionTime}s
+                    </div>
+                  ) : null}
+
+                  {state.output && (
+                    <div>
+                      {isExpanded ? (
+                        <ChevronUp className="h-4 w-4 text-zinc-500" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-zinc-500" />
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Tool Invocations */}

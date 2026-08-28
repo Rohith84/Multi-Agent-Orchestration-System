@@ -45,6 +45,7 @@ const INITIAL_EXECUTIONS: Record<string, UIExecutionState> = {
   planner: { agentName: "planner", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
   research: { agentName: "research", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
   coder: { agentName: "coder", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
+  validator: { agentName: "validator", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
   tester: { agentName: "tester", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
   reviewer: { agentName: "reviewer", status: "idle", output: "", executionTime: 0, toolInvocations: [] },
 };
@@ -110,8 +111,16 @@ export function useChat() {
           };
         });
         setExecutions(newExecutions);
-      } catch (error) {
+      } catch (error: any) {
         console.error("Failed to load chat history:", error);
+        if (error?.response?.status === 404) {
+          window.localStorage.removeItem(LAST_SESSION_STORAGE_KEY);
+          if (typeof window !== "undefined") {
+            const url = new URL(window.location.href);
+            url.searchParams.delete("session");
+            window.history.replaceState(null, "", url.pathname + url.search);
+          }
+        }
       }
     },
     [rememberSession]
@@ -174,11 +183,17 @@ export function useChat() {
         }
 
         const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+
         const response = await fetch(`${API_URL}/api/agents/chat`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers,
           body: JSON.stringify({
             message: messageText,
             session_id: sessionId || undefined,

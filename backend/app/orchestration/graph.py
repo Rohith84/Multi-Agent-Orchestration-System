@@ -2,7 +2,7 @@
 LangGraph orchestration graph builder with Autonomous Self-Repair Loop and Dynamic Routing.
 
 Defines the shared state and builds the state graph workflow:
-START -> Planner -> (Dynamic Routing) -> Research -> Coder -> Tester -> (Conditional Repair Loop) -> Reviewer -> END
+START -> Planner -> (Dynamic Routing) -> Research -> Coder -> Validator -> Tester -> (Conditional Repair Loop) -> Reviewer -> END
 """
 
 from typing import TypedDict, Any
@@ -14,6 +14,7 @@ from app.agents.research import ResearchAgent
 from app.agents.coder import CoderAgent
 from app.agents.tester import TesterAgent
 from app.agents.reviewer import ReviewerAgent
+from app.agents.validator import DeterministicValidator
 from app.ai.ollama_client import OllamaClient
 from app.mcp.clients.tool_runner import MCPToolRunner
 from app.core.logging import get_logger
@@ -151,6 +152,71 @@ def create_agent_graph(
             "execution_time": round(time.perf_counter() - started, 3),
         }
 
+    async def validator_node(state: AgentState) -> dict:
+        """Deterministic validation: syntax, imports, dependencies, manifest."""
+        logger.info("LangGraph Node: Validator (deterministic checks)")
+        started = time.perf_counter()
+        det_validator = DeterministicValidator()
+
+        sandbox_dir = workspace_service.workspace_dir if workspace_service else None
+        if not sandbox_dir or not sandbox_dir.exists():
+            logger.warning("Validator: no workspace directory available — skipping checks")
+            return {
+                "test_passed": True,
+                "current_agent": "validator",
+                "execution_time": round(time.perf_counter() - started, 3),
+            }
+
+        result = await det_validator.validate(sandbox_dir)
+
+        if not result["passed"]:
+            formatted_errors = []
+            for e in result["errors"]:
+                line_info = f"\nLine: {e['line']}" if e.get('line') else ""
+                action = (
+                    "Regenerate the missing file completely."
+                    if e["type"] == "MissingFile"
+                    else "Repair the syntax error and regenerate the complete affected file."
+                )
+                formatted_errors.append(
+                    f"Validation Failure\n"
+                    f"Error Type: {e['type']}\n"
+                    f"File: {e['file']}{line_info}\n"
+                    f"Message: {e['message']}\n\n"
+                    f"Required Action:\n{action}"
+                )
+
+            error_text = "\n---\n".join(formatted_errors)
+            attempts = state.get("repair_attempts", 0) + 1
+            logger.info(
+                "Validator FAILED with %d errors (repair attempt %d/3)",
+                len(result["errors"]),
+                attempts,
+            )
+            first_err = result["errors"][0]
+            return {
+                "test_passed": False,
+                "test_results": f"DETERMINISTIC VALIDATION FAILED:\n{error_text}",
+                "bug_report": {
+                    "failed_file": first_err["file"],
+                    "failed_test": "deterministic_validation",
+                    "stack_trace": error_text,
+                    "error_category": first_err["type"],
+                    "suggested_fix": f"Repair {first_err['type']} in {first_err['file']}: {first_err['message']}",
+                    "severity": "CRITICAL",
+                },
+                "repair_attempts": attempts,
+                "current_agent": "validator",
+                "execution_time": round(time.perf_counter() - started, 3),
+            }
+
+        logger.info("Validator PASSED — all deterministic checks clean")
+        return {
+            "test_passed": True,
+            "current_agent": "validator",
+            "execution_time": round(time.perf_counter() - started, 3),
+        }
+
     async def reviewer_node(state: AgentState) -> dict:
         logger.info("LangGraph Node: Reviewer")
         started = time.perf_counter()
@@ -207,6 +273,21 @@ def create_agent_graph(
 
     def route_after_coder(state: AgentState) -> str:
         req_agents = state.get("required_agents", [])
+        # Always route to validator after coder if tester is required
+        if "tester" in req_agents:
+            return "validator"
+        if "reviewer" in req_agents:
+            return "reviewer"
+        return "end"
+
+    def route_after_validator(state: AgentState) -> str:
+        """Route based on deterministic validation results."""
+        req_agents = state.get("required_agents", [])
+        # If validator set test_passed=False, loop back to coder for repair
+        if not state.get("test_passed", True) and state.get("repair_attempts", 0) < 3:
+            logger.info("Validator failed — routing back to Coder for repair (attempt %d/3)", state.get("repair_attempts"))
+            return "coder"
+        # Validation passed (or max retries) — proceed to tester
         if "tester" in req_agents:
             return "tester"
         if "reviewer" in req_agents:
@@ -230,10 +311,11 @@ def create_agent_graph(
     builder.add_node("planner", planner_node)
     builder.add_node("research", research_node)
     builder.add_node("coder", coder_node)
+    builder.add_node("validator", validator_node)
     builder.add_node("tester", tester_node)
     builder.add_node("reviewer", reviewer_node)
 
-    valid_starts = {"planner", "research", "coder", "tester", "reviewer"}
+    valid_starts = {"planner", "research", "coder", "validator", "tester", "reviewer"}
     if start_at not in valid_starts:
         raise ValueError(f"Unknown workflow resume agent: {start_at}")
 
@@ -252,6 +334,12 @@ def create_agent_graph(
         "end": END
     })
     builder.add_conditional_edges("coder", route_after_coder, {
+        "validator": "validator",
+        "reviewer": "reviewer",
+        "end": END
+    })
+    builder.add_conditional_edges("validator", route_after_validator, {
+        "coder": "coder",
         "tester": "tester",
         "reviewer": "reviewer",
         "end": END

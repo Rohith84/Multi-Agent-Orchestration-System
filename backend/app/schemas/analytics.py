@@ -4,6 +4,7 @@ Pydantic schemas for Analytics, LLM-as-a-Judge Evaluation, and Prompt Registry e
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -13,8 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class AgentMetricSchema(BaseModel):
     """Schema for a single agent execution metric."""
 
-    id: str
-    workflow_id: str
+    id: uuid.UUID
+    workflow_id: uuid.UUID
     agent_name: str
     model: str
     start_time: datetime
@@ -37,8 +38,8 @@ class AgentMetricSchema(BaseModel):
 class WorkflowMetricSchema(BaseModel):
     """Schema for workflow aggregated metrics."""
 
-    id: str
-    workflow_id: str
+    id: uuid.UUID
+    workflow_id: uuid.UUID
     total_duration: float
     total_tokens: int
     approval_wait_time: float
@@ -53,7 +54,7 @@ class WorkflowMetricSchema(BaseModel):
 class PromptVersionSchema(BaseModel):
     """Schema for prompt versioning entry."""
 
-    id: str
+    id: uuid.UUID
     agent_name: str
     version: str
     template: str
@@ -107,12 +108,14 @@ class RAGPerformanceStats(BaseModel):
 class DashboardAnalyticsResponse(BaseModel):
     """Complete system observability and analytics dashboard response."""
 
-    overall_quality_score: float
+    overall_quality_score: float | None = None
     total_workflows_executed: int
-    total_tokens_consumed: int
-    avg_workflow_latency: float
-    success_rate_percentage: float
+    total_tokens_consumed: int | None = None
+    avg_workflow_latency: float | None = None
+    success_rate_percentage: float | None = None
     model_stats: list[ModelPerformanceStats]
     tool_stats: list[ToolPerformanceStats]
-    rag_stats: RAGPerformanceStats
+    rag_stats: RAGPerformanceStats | None = None
     recent_agent_metrics: list[AgentMetricSchema]
+    token_usage_available: bool = False
+    rag_metrics_available: bool = False

@@ -37,6 +37,7 @@ export default function ChatPage() {
           sessionId={sessionId}
           onNewChat={newChat}
           onClearChat={clearChat}
+          showExport={!isPending && Object.values(executions).some(ex => ex.status !== "idle")}
         />
         <ChatWindow
           messages={messages}

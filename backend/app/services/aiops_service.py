@@ -305,28 +305,6 @@ class AIOpsService:
         filtered_count_stmt = select(func.count()).select_from(query.subquery())
         total_records = (await self.db.execute(filtered_count_stmt)).scalar() or 0
 
-        if total_records == 0:
-            rep = EvaluationReport(
-                org_id=org_id,
-                workflow_run_id="wf_sample_eval_001",
-                agent_role="Coder",
-                accuracy=96.0,
-                completeness=94.0,
-                correctness=98.0,
-                reasoning=92.0,
-                grounding=95.0,
-                hallucination_risk=1.5,
-                citation_quality=92.0,
-                code_quality=97.0,
-                safety=100.0,
-                overall_score=95.8,
-                summary="Optimal performance across code synthesis and unit testing.",
-            )
-            self.db.add(rep)
-            await self.db.commit()
-            total_records = 1
-            query = select(EvaluationReport).where(EvaluationReport.org_id == org_id)
-
         # Sorting
         sort_col = getattr(EvaluationReport, sort_by, EvaluationReport.created_at)
         order_clause = desc(sort_col) if sort_order.lower() == "desc" else asc(sort_col)
@@ -360,30 +338,6 @@ class AIOpsService:
         count_stmt = select(func.count()).select_from(query.subquery())
         total_records = (await self.db.execute(count_stmt)).scalar() or 0
 
-        if total_records == 0:
-            drift1 = DriftReportItem(
-                org_id=org_id,
-                drift_type="MODEL",
-                target_identifier="qwen2.5-coder:7b",
-                baseline_score=95.0,
-                current_score=94.2,
-                drift_delta=-0.8,
-                status="NORMAL",
-            )
-            drift2 = DriftReportItem(
-                org_id=org_id,
-                drift_type="PROMPT",
-                target_identifier="prompt_coder_v1.2",
-                baseline_score=94.0,
-                current_score=86.5,
-                drift_delta=-7.5,
-                status="WARNING",
-            )
-            self.db.add_all([drift1, drift2])
-            await self.db.commit()
-            total_records = 2
-            query = select(DriftReportItem).where(DriftReportItem.org_id == org_id)
-
         query = query.order_by(desc(DriftReportItem.created_at)).offset((page - 1) * page_size).limit(page_size)
         result = await self.db.execute(query)
         return list(result.scalars().all()), total_records
@@ -404,30 +358,6 @@ class AIOpsService:
 
         count_stmt = select(func.count()).select_from(query.subquery())
         total_records = (await self.db.execute(count_stmt)).scalar() or 0
-
-        if total_records == 0:
-            rec1 = OptimizationRecommendation(
-                org_id=org_id,
-                category="MODEL_SELECTION",
-                target_id="Planner",
-                recommended_action="Route reasoning-heavy architecture planning tasks to 'deepseek-r1:7b'.",
-                score_impact_estimate=4.5,
-                reasoning_summary="DeepSeek-R1 achieves 96.5 quality score vs 93.8 on complex planning workflows.",
-                status="PENDING_REVIEW",
-            )
-            rec2 = OptimizationRecommendation(
-                org_id=org_id,
-                category="PROMPT_OPTIMIZATION",
-                target_id="prompt_reviewer_v1",
-                recommended_action="Apply Few-Shot compression to reduce context tokens by 28%.",
-                score_impact_estimate=3.2,
-                reasoning_summary="Prompt token usage can be reduced from 1450 to 1040 tokens without loss of accuracy.",
-                status="PENDING_REVIEW",
-            )
-            self.db.add_all([rec1, rec2])
-            await self.db.commit()
-            total_records = 2
-            query = select(OptimizationRecommendation).where(OptimizationRecommendation.org_id == org_id)
 
         query = query.order_by(desc(OptimizationRecommendation.created_at)).offset((page - 1) * page_size).limit(page_size)
         result = await self.db.execute(query)

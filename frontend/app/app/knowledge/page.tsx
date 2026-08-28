@@ -59,10 +59,21 @@ export default function KnowledgePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+  const authFetch = async (url: string, options: RequestInit = {}) => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    const headers = {
+      ...(options.headers || {}),
+    } as Record<string, string>;
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    return fetch(url, { ...options, headers });
+  };
+
   // Fetch all documents
   const fetchDocs = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/knowledge`);
+      const res = await authFetch(`${API_URL}/api/knowledge`);
       if (!res.ok) throw new Error("Failed to fetch documents");
       const data = await res.json();
       setDocuments(data);
@@ -77,7 +88,7 @@ export default function KnowledgePage() {
   // Poll reindexing progress
   const pollReindexProgress = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/knowledge/reindex/progress`);
+      const res = await authFetch(`${API_URL}/api/knowledge/reindex/progress`);
       if (!res.ok) throw new Error("Failed to check reindexing status");
       const data = await res.json();
       setReindexStatus(data);
@@ -158,7 +169,7 @@ export default function KnowledgePage() {
     formData.append("file", file);
 
     try {
-      const res = await fetch(`${API_URL}/api/knowledge/upload`, {
+      const res = await authFetch(`${API_URL}/api/knowledge/upload`, {
         method: "POST",
         body: formData,
       });
@@ -186,7 +197,7 @@ export default function KnowledgePage() {
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/knowledge/${id}`, {
+      const res = await authFetch(`${API_URL}/api/knowledge/${id}`, {
         method: "DELETE",
       });
 
@@ -206,7 +217,7 @@ export default function KnowledgePage() {
   // Trigger Reindexing
   const triggerReindex = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/knowledge/reindex`, {
+      const res = await authFetch(`${API_URL}/api/knowledge/reindex`, {
         method: "POST",
       });
 

@@ -90,6 +90,14 @@ class WorkflowExecutor:
             return "end"
         if node_name == "coder":
             if "tester" in req_agents:
+                return "validator"
+            if "reviewer" in req_agents:
+                return "reviewer"
+            return "end"
+        if node_name == "validator":
+            if not state.get("test_passed", True) and state.get("repair_attempts", 0) < 3:
+                return "coder"
+            if "tester" in req_agents:
                 return "tester"
             if "reviewer" in req_agents:
                 return "reviewer"
@@ -217,6 +225,17 @@ class WorkflowExecutor:
                     yield self._format_sse_event({"event": "workflow_cancelled", "workflow_id": str(workflow_id)})
                     return
                 current_state.update(node_output)
+
+                # Validator is an internal Quality Gate, not an LLM agent card
+                if node_name == "validator":
+                    if not current_state.get("test_passed", True):
+                        yield self._format_sse_event({
+                            "event": "repair_loop_retry",
+                            "attempt": current_state.get("repair_attempts", 1),
+                            "message": f"Coder repairing code based on structural validation failure (attempt {current_state.get('repair_attempts', 1)}/3)..."
+                        })
+                    continue
+
                 pct = AGENT_PROGRESS_MAP.get(node_name, 50)
                 execution_time = float(node_output.get("execution_time", 0.0))
 
@@ -262,6 +281,46 @@ class WorkflowExecutor:
                     execution_time=execution_time,
                     status="success",
                 )
+                
+                # Save AgentMetric
+                from app.models.metrics import AgentMetric
+                from app.orchestration.router import get_model_for_agent
+                from datetime import timedelta
+                
+                model_used = get_model_for_agent(node_name)
+                
+                agent_score = 9.0
+                eval_breakdown = {}
+                if node_name == "reviewer":
+                    raw_score = current_state.get("overall_score", 90.0)
+                    agent_score = raw_score / 10.0 if raw_score > 10.0 else raw_score
+                    eval_breakdown = {
+                        "accuracy": agent_score,
+                        "completeness": agent_score,
+                        "correctness": agent_score,
+                        "safety": 10.0
+                    }
+                elif node_name == "tester":
+                    agent_score = 10.0 if current_state.get("test_passed") else 0.0
+                
+                self.db.add(AgentMetric(
+                    workflow_id=workflow_id,
+                    agent_name=node_name,
+                    model=model_used,
+                    start_time=datetime.utcnow() - timedelta(seconds=execution_time),
+                    end_time=datetime.utcnow(),
+                    duration=execution_time,
+                    input_tokens=0,
+                    output_tokens=0,
+                    total_tokens=0,
+                    status="success" if current_state.get("status") != "failed" else "failed",
+                    retry_count=current_state.get("repair_attempts", 0) if node_name in ("coder", "tester") else 0,
+                    tool_calls=len(current_state.get("tool_invocations", [])),
+                    knowledge_chunks=0,
+                    score=agent_score,
+                    eval_breakdown=eval_breakdown,
+                ))
+
                 next_agent = self._next_agent(node_name, current_state)
                 current_state["next_agent"] = next_agent
                 await self.wf_repo.save_checkpoint(
@@ -285,6 +344,9 @@ class WorkflowExecutor:
                     self.db.add(QualityReport(
                         workflow_id=workflow_id,
                         quality_gate=str(current_state.get("quality_gate", "PASS")),
+                        overall_score=float(current_state.get("overall_score", 90.0) / 10.0),
+                        lint_findings=current_state.get("lint_findings", []),
+                        security_findings=current_state.get("security_findings", []),
                     ))
                 await self.wf_repo.update_workflow(
                     workflow_id,
@@ -333,6 +395,21 @@ class WorkflowExecutor:
                 execution_time=round(time.perf_counter() - started_at, 3),
             )
             await self.chat_repo.save_message(session_id=session_id, role="assistant", message=final_answer, model=self.settings.model_reviewer)
+            
+            # Save final success WorkflowMetric
+            from app.models.metrics import WorkflowMetric
+            raw_score = current_state.get("overall_score", 90.0)
+            final_score = raw_score / 10.0 if raw_score > 10.0 else raw_score
+            self.db.add(WorkflowMetric(
+                workflow_id=workflow_id,
+                total_duration=round(time.perf_counter() - started_at, 3),
+                total_tokens=0,
+                approval_wait_time=0.0,
+                tool_execution_time=0.0,
+                rag_time=0.0,
+                overall_score=float(final_score),
+            ))
+            
             await self.db.commit()
             yield self._format_sse_event({"event": "workflow_complete", "workflow_id": str(workflow_id), "session_id": str(session_id), "response": final_answer, "progress_percentage": 100})
         except asyncio.CancelledError:
@@ -341,6 +418,19 @@ class WorkflowExecutor:
         except Exception as exc:
             logger.exception("Workflow %s failed", workflow_id)
             await self.wf_repo.update_workflow(workflow_id, status="failed", error_message=str(exc), execution_time=round(time.perf_counter() - started_at, 3))
+            
+            # Save failed WorkflowMetric
+            from app.models.metrics import WorkflowMetric
+            self.db.add(WorkflowMetric(
+                workflow_id=workflow_id,
+                total_duration=round(time.perf_counter() - started_at, 3),
+                total_tokens=0,
+                approval_wait_time=0.0,
+                tool_execution_time=0.0,
+                rag_time=0.0,
+                overall_score=0.0,
+            ))
+            
             await self.db.commit()
             yield self._format_sse_event({"event": "workflow_failed", "workflow_id": str(workflow_id), "error": "Workflow execution failed."})
         finally:
