@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
+from app.core.auth import get_current_user
 from app.core.logging import get_logger
 from app.schemas.agents import AgentRequest, AgentHistoryResponse, AgentExecutionSchema
 from app.schemas.chat import ChatMessageSchema
@@ -37,6 +38,7 @@ def _get_chat_repository(db: AsyncSession = Depends(get_db)) -> ChatRepository:
 async def run_agent_workflow(
     request: AgentRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
     """
     Start a multi-agent orchestration request.
@@ -67,6 +69,7 @@ async def get_workflow_history(
     session_id: str,
     agent_repo: AgentExecutionRepository = Depends(_get_agent_repository),
     chat_repo: ChatRepository = Depends(_get_chat_repository),
+    current_user: dict = Depends(get_current_user),
 ) -> AgentHistoryResponse:
     """
     Retrieve aggregated history for a session, including messages and agent logs.
@@ -126,6 +129,7 @@ async def delete_workflow_history(
     db: AsyncSession = Depends(get_db),
     agent_repo: AgentExecutionRepository = Depends(_get_agent_repository),
     chat_repo: ChatRepository = Depends(_get_chat_repository),
+    current_user: dict = Depends(get_current_user),
 ) -> dict:
     """
     IRREVERSIBLE: Delete all messages and agent run logs for this session.

@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
+from app.core.auth import get_current_user
 from app.core.logging import get_logger
 from app.services.knowledge_service import KnowledgeService
 
@@ -20,7 +21,11 @@ from app.knowledge.loader import UnsupportedFileTypeError
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+router = APIRouter(
+    prefix="/api/knowledge",
+    tags=["knowledge"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _get_knowledge_service(db: AsyncSession = Depends(get_db)) -> KnowledgeService:

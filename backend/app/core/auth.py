@@ -6,7 +6,6 @@ Provides JWT token management, bcrypt password verification, and role-based acce
 
 from __future__ import annotations
 
-import os
 import time
 from datetime import datetime, timedelta
 from typing import Any
@@ -21,22 +20,37 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super-secret-enterprise-jwt-key-2026")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8 hours
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+import bcrypt
+
+# oauth2_scheme setup
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=True)
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+
+def _get_secret_key() -> str:
+    """Load JWT secret from settings (env-driven, not hardcoded)."""
+    return get_settings().jwt_secret_key
 
 
 def hash_password(password: str) -> str:
     """Hash password string using bcrypt."""
-    return pwd_context.hash(password)
+    pw_bytes = password.encode("utf-8")
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pw_bytes, salt)
+    return hashed.decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify plaintext password against bcrypt hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        pw_bytes = plain_password.encode("utf-8")
+        hash_bytes = hashed_password.encode("utf-8")
+        return bcrypt.checkpw(pw_bytes, hash_bytes)
+    except Exception:
+        return False
 
 
 def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
@@ -44,34 +58,52 @@ def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = 
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(to_encode, _get_secret_key(), algorithm=ALGORITHM)
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
     """Decode and validate JWT access token."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, _get_secret_key(), algorithms=[ALGORITHM])
         return payload
     except JWTError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token",
+            detail="Invalid or expired authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict[str, Any]:
-    """Dependency injector yielding current authenticated user payload."""
-    if not token:
-        # Fallback admin for local development
-        return {
-            "id": "00000000-0000-0000-0000-000000000001",
-            "org_id": "00000000-0000-0000-0000-000000000001",
-            "email": "admin@enterprise.com",
-            "role": "Platform Admin",
-        }
+    """
+    Dependency injector yielding current authenticated user payload.
+
+    Requires a valid JWT token. Returns 401 if missing or invalid.
+    """
     payload = decode_access_token(token)
+    if not payload.get("sub"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token: missing subject",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return payload
+
+
+async def get_optional_user(token: str | None = Depends(oauth2_scheme_optional)) -> dict[str, Any] | None:
+    """
+    Optional authentication dependency.
+
+    Returns user payload if a valid token is present, None otherwise.
+    Used for endpoints that can work with or without authentication.
+    """
+    if not token:
+        return None
+    try:
+        payload = decode_access_token(token)
+        return payload if payload.get("sub") else None
+    except HTTPException:
+        return None
 
 
 def require_role(allowed_roles: list[str]):

@@ -22,6 +22,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
+from app.core.auth import get_current_user
 from app.core.logging import get_logger
 from app.schemas.workflows import (
     WorkflowStartRequest,
@@ -37,7 +38,11 @@ from app.orchestration.workflow import WorkflowExecutor
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/api/workflows", tags=["workflows"])
+router = APIRouter(
+    prefix="/api/workflows",
+    tags=["workflows"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _get_workflow_service(db: AsyncSession = Depends(get_db)) -> WorkflowService:

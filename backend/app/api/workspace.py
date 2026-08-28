@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
+from app.core.auth import get_current_user
 from app.core.logging import get_logger
 from app.models.workspace import WorkspaceFile, WorkspaceSnapshot, TestReport, QualityReport
 from app.schemas.workspace import (
@@ -34,7 +35,11 @@ from app.services.workspace_service import WorkspaceService
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/api", tags=["workspace"])
+router = APIRouter(
+    prefix="/api",
+    tags=["workspace"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("/workspace/export-zip")

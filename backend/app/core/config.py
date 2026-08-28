@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     app_name: str = "Multi Agent Orchestration System"
     debug: bool = False
 
+    # Security
+    jwt_secret_key: str = "super-secret-enterprise-jwt-key-2026"
+
     # Database
     database_url: str = "postgresql+asyncpg://postgres:rohith2007@localhost:5432/multi_agent_db"
 

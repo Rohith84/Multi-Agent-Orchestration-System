@@ -102,6 +102,11 @@ class PlannerAgent:
             "- **Required Context**: What information or project files each agent will need.\n"
             "- **Required Tools**: Any tools, APIs, or external resources needed.\n"
             "- **Risks or Unknowns**: Anything that could block execution or requires clarification.\n\n"
+            "At the very end of your response, you MUST output a single, separate line with exactly this format:\n"
+            "REQUIRED_AGENTS: agent1, agent2, ...\n"
+            "Include only the names of agents that are strictly necessary for the user's specific request. Choices are: research, coder, tester, reviewer. (Note: coder and tester should always be used together for coding tasks. planner is always run first and is implicit, do not list it).\n"
+            "Example final line:\n"
+            "REQUIRED_AGENTS: research, reviewer\n\n"
             "Keep the plan concise, actionable, and technically precise."
         )
 

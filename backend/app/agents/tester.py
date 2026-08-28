@@ -154,24 +154,11 @@ class TesterAgent:
             }
 
         try:
+            from app.utils.sandbox import SecureExecutor
+            executor = SecureExecutor(timeout=30.0)
             cmd = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", str(sandbox_path)]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(sandbox_path),
-            )
-            stdout, stderr = await proc.communicate()
-            duration = round(time.time() - start, 2)
-            passed = (proc.returncode == 0)
-
-            return {
-                "passed": passed,
-                "exit_code": proc.returncode,
-                "stdout": stdout.decode(errors="ignore"),
-                "stderr": stderr.decode(errors="ignore"),
-                "execution_time": duration,
-            }
+            res = await executor.execute_command(cmd, sandbox_path)
+            return res
         except Exception as e:
             logger.warning("Pytest subprocess execution failed: %s", e)
             return {
@@ -180,4 +167,5 @@ class TesterAgent:
                 "stdout": f"Test runner output: {e}",
                 "stderr": "",
                 "execution_time": 0.1,
+                "timeout_triggered": False,
             }

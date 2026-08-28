@@ -22,10 +22,15 @@ const api: AxiosInstance = axios.create({
   },
 });
 
-// Request interceptor — add auth tokens here in future milestones
+// Request interceptor — attach JWT token
 api.interceptors.request.use(
   (config) => {
-    // Future: attach JWT or API key
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("access_token");
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
     return config;
   },
   (error) => {
@@ -33,20 +38,25 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor — centralized error handling
+// Response interceptor — centralized error handling & 401 redirect
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response) {
-      // Server responded with a status code outside 2xx
       console.error(
         `API Error: ${error.response.status} - ${error.response.statusText}`
       );
+      if (error.response.status === 401) {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("access_token");
+          if (!window.location.pathname.startsWith("/login")) {
+            window.location.href = "/login";
+          }
+        }
+      }
     } else if (error.request) {
-      // Request was made but no response received
       console.error("API Error: No response received from backend");
     } else {
-      // Something else happened
       console.error(`API Error: ${error.message}`);
     }
     return Promise.reject(error);

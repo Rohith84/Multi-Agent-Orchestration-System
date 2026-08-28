@@ -70,11 +70,18 @@ export default function LoginPage() {
       formData.append("username", email);
       formData.append("password", password);
 
-      await api.post("/api/auth/login", formData, {
+      const { data } = await api.post("/api/auth/login", formData, {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
         },
       });
+
+      // Save token and user info
+      if (data && data.access_token) {
+        localStorage.setItem("access_token", data.access_token);
+        localStorage.setItem("user_email", data.email || "");
+        localStorage.setItem("user_role", data.role || "");
+      }
 
       // Success — navigate to authenticated app
       router.push("/app");

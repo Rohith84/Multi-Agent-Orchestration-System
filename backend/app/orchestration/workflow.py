@@ -73,14 +73,33 @@ class WorkflowExecutor:
 
     @staticmethod
     def _next_agent(node_name: str, state: AgentState) -> str:
+        req_agents = state.get("required_agents", [])
         if node_name == "planner":
-            return "research"
+            if "research" in req_agents:
+                return "research"
+            if "coder" in req_agents:
+                return "coder"
+            if "reviewer" in req_agents:
+                return "reviewer"
+            return "end"
         if node_name == "research":
-            return "coder"
+            if "coder" in req_agents:
+                return "coder"
+            if "reviewer" in req_agents:
+                return "reviewer"
+            return "end"
         if node_name == "coder":
-            return "tester"
+            if "tester" in req_agents:
+                return "tester"
+            if "reviewer" in req_agents:
+                return "reviewer"
+            return "end"
         if node_name == "tester":
-            return "reviewer" if state.get("test_passed") else "coder"
+            if not state.get("test_passed", True) and state.get("repair_attempts", 0) < 3:
+                return "coder"
+            if "reviewer" in req_agents:
+                return "reviewer"
+            return "end"
         return "end"
 
     async def execute(
@@ -133,6 +152,7 @@ class WorkflowExecutor:
             "session_id": str(session_id),
             "user_request": user_request,
             "execution_plan": "",
+            "required_agents": [],
             "research_notes": "",
             "generated_code": "",
             "test_results": "",
