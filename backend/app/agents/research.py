@@ -139,7 +139,7 @@ class ResearchAgent:
         ]
 
         # Call Ollama for research summary
-        summary = await self.client.chat(messages, model=self.model)
+        summary = await self.client.chat(messages, model=self.model, max_tokens=1400)
 
         # 5. Format detailed structured output for the timeline/SSE and Coder Agent
         output_parts = []

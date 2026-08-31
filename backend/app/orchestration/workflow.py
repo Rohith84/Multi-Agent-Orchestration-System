@@ -90,20 +90,14 @@ class WorkflowExecutor:
             return "end"
         if node_name == "coder":
             if "tester" in req_agents:
-                return "validator"
-            if "reviewer" in req_agents:
-                return "reviewer"
-            return "end"
-        if node_name == "validator":
-            if not state.get("test_passed", True) and state.get("repair_attempts", 0) < 3:
-                return "coder"
-            if "tester" in req_agents:
                 return "tester"
             if "reviewer" in req_agents:
                 return "reviewer"
             return "end"
         if node_name == "tester":
-            if not state.get("test_passed", True) and state.get("repair_attempts", 0) < 3:
+            return "validator"
+        if node_name == "validator":
+            if not state.get("test_passed", False) and state.get("repair_attempts", 0) < 3:
                 return "coder"
             if "reviewer" in req_agents:
                 return "reviewer"
@@ -164,6 +158,8 @@ class WorkflowExecutor:
             "research_notes": "",
             "generated_code": "",
             "test_results": "",
+            "tester_analysis": "",
+            "validation_results": {},
             "review": "",
             "current_agent": "start",
             "errors": [],
@@ -171,7 +167,7 @@ class WorkflowExecutor:
             "repair_attempts": 0,
             "test_passed": False,
             "bug_report": None,
-            "quality_gate": "PASS",
+            "quality_gate": "PENDING",
         }
 
         if resume_agent:
@@ -226,13 +222,20 @@ class WorkflowExecutor:
                     return
                 current_state.update(node_output)
 
-                # Validator is an internal Quality Gate, not an LLM agent card
+                # Validator (Quality Gate) is an internal infrastructure node, not an LLM agent card
                 if node_name == "validator":
-                    if not current_state.get("test_passed", True):
+                    if not current_state.get("test_passed", False):
                         yield self._format_sse_event({
                             "event": "repair_loop_retry",
                             "attempt": current_state.get("repair_attempts", 1),
-                            "message": f"Coder repairing code based on structural validation failure (attempt {current_state.get('repair_attempts', 1)}/3)..."
+                            "message": f"Quality Gate failed — Coder repairing code (attempt {current_state.get('repair_attempts', 1)}/3)..."
+                        })
+                    else:
+                        yield self._format_sse_event({
+                            "event": "quality_gate",
+                            "decision": current_state.get("quality_gate", "PENDING"),
+                            "workflow_id": str(workflow_id),
+                            "message": f"Quality Gate: {current_state.get('quality_gate', 'PENDING')}",
                         })
                     continue
 
@@ -272,6 +275,14 @@ class WorkflowExecutor:
                         "workflow_id": str(workflow_id),
                     })
 
+                # Determine accurate node execution status
+                node_status = "success"
+                if node_name == "tester":
+                    # Tester generates tests, doesn't determine pass/fail
+                    node_status = "success"
+                elif node_name == "reviewer" and current_state.get("quality_gate") == "FAIL":
+                    node_status = "failed"
+
                 # Save execution log & checkpoint
                 await self.agent_repo.save_execution(
                     session_id=session_id,
@@ -279,7 +290,7 @@ class WorkflowExecutor:
                     input_content=self._get_agent_input(node_name, current_state),
                     output_content=output_text,
                     execution_time=execution_time,
-                    status="success",
+                    status=node_status,
                 )
                 
                 # Save AgentMetric
@@ -301,7 +312,8 @@ class WorkflowExecutor:
                         "safety": 10.0
                     }
                 elif node_name == "tester":
-                    agent_score = 10.0 if current_state.get("test_passed") else 0.0
+                    # Tester generates tests — score based on test generation, not execution
+                    agent_score = 8.0  # Default good score for test generation
                 
                 self.db.add(AgentMetric(
                     workflow_id=workflow_id,
@@ -313,7 +325,7 @@ class WorkflowExecutor:
                     input_tokens=0,
                     output_tokens=0,
                     total_tokens=0,
-                    status="success" if current_state.get("status") != "failed" else "failed",
+                    status=node_status,
                     retry_count=current_state.get("repair_attempts", 0) if node_name in ("coder", "tester") else 0,
                     tool_calls=len(current_state.get("tool_invocations", [])),
                     knowledge_chunks=0,
@@ -360,7 +372,7 @@ class WorkflowExecutor:
                 yield self._format_sse_event({
                     "event": "agent_end",
                     "agent": node_name,
-                    "status": "success",
+                    "status": node_status,
                     "output": output_text,
                     "execution_time": execution_time,
                     "progress_percentage": pct,
@@ -385,18 +397,20 @@ class WorkflowExecutor:
                     })
                     return
 
-            # Save final response
+            # Determine final workflow status
             final_answer = current_state.get("review", "Workflow completed.")
+            final_status = "failed" if (current_state.get("quality_gate") == "FAIL" or not current_state.get("test_passed", False)) else "completed"
+
             await self.wf_repo.update_workflow(
                 workflow_id,
-                status="completed",
+                status=final_status,
                 progress_percentage=100,
                 current_agent="end",
                 execution_time=round(time.perf_counter() - started_at, 3),
             )
             await self.chat_repo.save_message(session_id=session_id, role="assistant", message=final_answer, model=self.settings.model_reviewer)
             
-            # Save final success WorkflowMetric
+            # Save final WorkflowMetric
             from app.models.metrics import WorkflowMetric
             raw_score = current_state.get("overall_score", 90.0)
             final_score = raw_score / 10.0 if raw_score > 10.0 else raw_score
@@ -411,7 +425,15 @@ class WorkflowExecutor:
             ))
             
             await self.db.commit()
-            yield self._format_sse_event({"event": "workflow_complete", "workflow_id": str(workflow_id), "session_id": str(session_id), "response": final_answer, "progress_percentage": 100})
+            yield self._format_sse_event({
+                "event": "workflow_complete",
+                "workflow_id": str(workflow_id),
+                "session_id": str(session_id),
+                "response": final_answer,
+                "progress_percentage": 100,
+                "status": final_status,
+                "quality_gate": current_state.get("quality_gate", "PASS"),
+            })
         except asyncio.CancelledError:
             await self._mark_cancelled(workflow_id, session_id, time.perf_counter() - started_at)
             raise

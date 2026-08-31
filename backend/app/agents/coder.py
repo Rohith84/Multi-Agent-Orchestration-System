@@ -71,7 +71,19 @@ class CoderAgent:
             "- For full-stack apps, always include: models, schemas/Pydantic, API routes, service layer, "
             "database initialization, and a minimal working frontend.\n"
             "- Include proper error handling (try/except, HTTPException with status codes) in all API endpoints.\n"
-            "- Include database session management (dependency injection, cleanup).\n\n"
+            "## Strict Narrative vs Code Block Separation Rules (CRITICAL)\n"
+            "- Place ALL narrative explanations, implementation summaries, reasoning, and prose text OUTSIDE code blocks.\n"
+            "- Code blocks MUST contain ONLY valid executable source code (starting directly with imports or code statements).\n"
+            "- NEVER put markdown headings (e.g. `### Implementation Summary`), prose descriptions, or review/test summaries INSIDE code blocks.\n"
+            "- EVERY code block MUST specify its target relative file path using `filepath=\"...\"`:\n"
+            "  ```python filepath=\"app/main.py\"\n"
+            "  from fastapi import FastAPI\n"
+            "  # valid python code only\n"
+            "  ```\n\n"
+            "## Test Isolation & Determinism Rules (CRITICAL for test files)\n"
+            "- If you generate unit test files (`test_suite.py` or `tests/test_*.py`), tests MUST be isolated and independent.\n"
+            "- DO NOT hardcode static database IDs (e.g. ID 1). Always create test items dynamically via POST inside each test and extract the returned ID before testing GET, PUT, or DELETE endpoints.\n"
+            "- DO NOT assume pre-existing database records.\n\n"
             "## Output Format\n"
             "For every file you create or modify, use annotated code blocks with the filepath:\n"
             "```python filepath=\"path/to/file.py\"\n"
@@ -121,17 +133,15 @@ class CoderAgent:
         return response
 
     async def _persist_parsed_files(self, response_text: str, workspace_service: WorkspaceService) -> None:
-        """Parse code blocks with filepath annotations and write them to disk."""
-        pattern = r"```([a-zA-Z0-9_-]*)\s+(?:filepath|file)=[\"']?([^\"'\s\n>]+)[\"']?\n(.*?)```"
-        matches = re.findall(pattern, response_text, re.DOTALL)
+        """Parse clean code blocks and write artifacts to disk. Filters out markdown prose."""
+        from app.utils.artifact_extractor import extract_code_artifacts
 
-        if not matches:
-            # Fallback: Save entire output to main.py if no annotated code blocks
-            await workspace_service.write_file("main.py", response_text, "python")
+        artifacts = extract_code_artifacts(response_text)
+
+        if not artifacts:
+            logger.warning("No valid code artifacts found in Coder Agent output — skipping workspace write.")
             return
 
-        for lang, rel_path, content in matches:
-            clean_lang = lang.strip().lower() or "python"
-            clean_path = rel_path.strip().lstrip("/\\")
-            await workspace_service.write_file(clean_path, content.strip(), clean_lang)
-            logger.info("Persisted generated file to workspace: %s (%s)", clean_path, clean_lang)
+        for artifact in artifacts:
+            await workspace_service.write_file(artifact.path, artifact.content, artifact.language)
+            logger.info("Persisted clean generated artifact to workspace: %s (%s)", artifact.path, artifact.language)

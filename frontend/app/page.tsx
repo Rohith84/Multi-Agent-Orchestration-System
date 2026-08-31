@@ -150,13 +150,13 @@ const AGENTS = [
 
 /* ── Orchestration Flow Steps ── */
 const FLOW_STEPS = [
-  { label: "USER INTENT", num: "01", color: "var(--fg-primary)" },
-  { label: "PLANNING", num: "02", color: "var(--agent-planner)" },
-  { label: "RESEARCH", num: "03", color: "var(--agent-researcher)" },
-  { label: "CODING", num: "04", color: "var(--agent-coder)" },
-  { label: "TESTING", num: "05", color: "var(--agent-tester)" },
-  { label: "REVIEW", num: "06", color: "var(--agent-reviewer)" },
-  { label: "RESULT", num: "07", color: "var(--accent-success)" },
+  { label: "USER INTENT", num: "01", accent: "var(--fg-primary)", textAccent: "var(--fg-primary)" },
+  { label: "PLANNING", num: "02", accent: "var(--agent-planner)", textAccent: "var(--agent-planner-text)" },
+  { label: "RESEARCH", num: "03", accent: "var(--agent-researcher)", textAccent: "var(--agent-researcher)" },
+  { label: "CODING", num: "04", accent: "var(--agent-coder)", textAccent: "var(--agent-coder)" },
+  { label: "TESTING", num: "05", accent: "var(--agent-tester)", textAccent: "var(--agent-tester)" },
+  { label: "REVIEW", num: "06", accent: "var(--agent-reviewer)", textAccent: "var(--agent-reviewer)" },
+  { label: "RESULT", num: "07", accent: "var(--accent-success)", textAccent: "var(--accent-success)" },
 ];
 
 /* ── Platform Capabilities ── */
@@ -457,33 +457,44 @@ export default function LandingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
             {/* Traditional AI */}
-            <div className="brutalist-card p-8 border-2 border-[var(--border-primary)]">
-              <h3
-                className="text-h4 font-black mb-6"
-                style={{ color: "var(--fg-primary)" }}
-              >
-                TRADITIONAL AI
-              </h3>
-              <div className="space-y-4 text-center">
-                {["User", "Single Model", "Response"].map((step, i) => (
-                  <div key={step}>
+            <div className="brutalist-card p-8 border-2 border-[var(--border-secondary)] opacity-90" style={{ background: "var(--bg-inset)" }}>
+              <div className="flex items-center justify-between mb-6">
+                <h3
+                  className="text-h4 font-black"
+                  style={{ color: "var(--fg-secondary)" }}
+                >
+                  TRADITIONAL AI
+                </h3>
+                <span className="px-2 py-0.5 border border-[var(--border-secondary)] text-[10px] font-mono font-bold uppercase tracking-wider bg-[var(--bg-secondary)] text-[var(--fg-tertiary)]">
+                  MONOLITHIC
+                </span>
+              </div>
+              <div className="space-y-3.5 text-center">
+                {[
+                  { title: "User Prompt", subtitle: "Raw unstructured request", isError: false },
+                  { title: "Single LLM Model", subtitle: "No separation of concerns · Hallucination risk", isError: true },
+                  { title: "Unverified Response", subtitle: "No automated tests or deterministic gate", isError: false },
+                ].map((step, i, arr) => (
+                  <div key={step.title}>
                     <div
-                      className="inline-block px-6 py-3 border-2 font-extrabold shadow-[var(--shadow-brutalist-sm)]"
+                      className="inline-block w-full max-w-[280px] p-3 border-2 font-bold shadow-[var(--shadow-brutalist-sm)]"
                       style={{
-                        borderColor: i === 1 ? "var(--accent-error)" : "var(--border-primary)",
-                        background: i === 1 ? "var(--bg-surface)" : "var(--bg-secondary)",
-                        color: "var(--fg-primary)",
+                        borderColor: step.isError ? "var(--accent-error)" : "var(--border-secondary)",
+                        background: step.isError ? "rgba(239, 68, 68, 0.08)" : "var(--bg-surface)",
+                        color: step.isError ? "var(--accent-error)" : "var(--fg-primary)",
                       }}
                     >
-                      <span className="text-caption font-extrabold tracking-wide">
-                        {step}
+                      <span className="text-caption font-black block">
+                        {step.title}
+                      </span>
+                      <span className="text-[11px] font-normal block mt-0.5 opacity-80">
+                        {step.subtitle}
                       </span>
                     </div>
-                    {i < 2 && (
+                    {i < arr.length - 1 && (
                       <div className="flex justify-center my-2">
                         <ArrowDown
-                          className="w-4 h-4"
-                          style={{ color: "var(--fg-primary)" }}
+                          className="w-4 h-4 text-[var(--fg-tertiary)]"
                           aria-hidden="true"
                         />
                       </div>
@@ -494,45 +505,94 @@ export default function LandingPage() {
             </div>
 
             {/* MultiAgent OS */}
-            <div className="brutalist-card p-8 landing-glow-accent">
-              <h3
-                className="text-h4 mb-6"
-                style={{ color: "var(--accent-text)" }}
-              >
-                MULTIAGENT OS
-              </h3>
-              <div className="space-y-3 text-center">
+            <div className="brutalist-card p-8 border-2 border-[var(--border-primary)] shadow-[var(--shadow-brutalist)] relative" style={{ background: "var(--bg-surface)" }}>
+              <div className="flex items-center justify-between mb-6">
+                <h3
+                  className="text-h4 font-black"
+                  style={{ color: "var(--fg-primary)" }}
+                >
+                  MULTIAGENT OS
+                </h3>
+                <span className="px-2.5 py-0.5 border-2 border-[var(--border-primary)] text-[10px] font-black uppercase tracking-wider bg-[var(--accent-primary)] text-[#111111] shadow-[1px_1px_0px_0px_#111]">
+                  AUTONOMOUS PIPELINE
+                </span>
+              </div>
+              <div className="space-y-2.5 text-center">
                 {[
-                  { label: "User", color: "var(--fg-primary)", bg: "var(--bg-surface)", fg: "var(--fg-primary)" },
-                  { label: "Orchestrator", color: "var(--border-primary)", bg: "var(--accent-primary)", fg: "#111111" },
-                  { label: "Planner", color: "var(--border-primary)", bg: "var(--agent-planner)", fg: "#111111" },
                   {
-                    label: "Research / Coding / Testing",
-                    color: "var(--agent-researcher)",
-                    bg: "var(--bg-surface)",
-                    fg: "var(--agent-researcher)",
+                    title: "1. User Intent",
+                    subtitle: "Structured Goal & Constraints",
+                    accent: "var(--fg-primary)",
+                    border: "var(--border-primary)",
+                    bg: "var(--bg-secondary)",
                   },
-                  { label: "Reviewer", color: "var(--agent-reviewer)", bg: "var(--bg-surface)", fg: "var(--agent-reviewer)" },
-                  { label: "Final Result", color: "var(--accent-success)", bg: "var(--accent-success)", fg: "#111111" },
+                  {
+                    title: "2. Planner Agent",
+                    subtitle: "Task Decomposition & File Manifest",
+                    accent: "#CA8A04",
+                    border: "#EAB308",
+                    bg: "rgba(234, 179, 8, 0.12)",
+                  },
+                  {
+                    title: "3. Research & Coder",
+                    subtitle: "RAG Retrieval & Clean Artifact Gen",
+                    accent: "#7C3AED",
+                    border: "#8B5CF6",
+                    bg: "rgba(139, 92, 246, 0.12)",
+                  },
+                  {
+                    title: "4. Quality Gate & Tester",
+                    subtitle: "AST, Ruff, Pytest Sandbox & Bandit",
+                    accent: "#D97706",
+                    border: "#F59E0B",
+                    bg: "rgba(245, 158, 11, 0.12)",
+                  },
+                  {
+                    title: "5. Reviewer Agent",
+                    subtitle: "Architecture & Evidence Verification",
+                    accent: "#2563EB",
+                    border: "#3B82F6",
+                    bg: "rgba(59, 130, 246, 0.12)",
+                  },
+                  {
+                    title: "6. Production Result",
+                    subtitle: "Verified Zero-Hallucination Delivery",
+                    accent: "#16A34A",
+                    border: "#22C55E",
+                    bg: "rgba(34, 197, 94, 0.15)",
+                  },
                 ].map((step, i, arr) => (
-                  <div key={step.label}>
+                  <div key={step.title}>
                     <div
-                      className="inline-block px-5 py-2.5 border-2 font-extrabold"
+                      className="inline-block w-full max-w-[320px] p-2.5 border-2 font-bold shadow-[var(--shadow-brutalist-sm)] transition-all duration-150 hover:-translate-y-0.5 text-left"
                       style={{
-                        borderColor: step.color,
+                        borderColor: step.border,
                         background: step.bg,
-                        color: step.fg,
                       }}
                     >
-                      <span className="text-caption font-extrabold tracking-wide">
-                        {step.label}
+                      <div className="flex items-center justify-between">
+                        <span
+                          className="text-caption font-black uppercase tracking-wide"
+                          style={{ color: "var(--fg-primary)" }}
+                        >
+                          {step.title}
+                        </span>
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ background: step.border }}
+                        />
+                      </div>
+                      <span
+                        className="text-[11px] font-medium block mt-0.5"
+                        style={{ color: "var(--fg-secondary)" }}
+                      >
+                        {step.subtitle}
                       </span>
                     </div>
                     {i < arr.length - 1 && (
                       <div className="flex justify-center my-1">
                         <ArrowDown
-                          className="w-3 h-3"
-                          style={{ color: step.color }}
+                          className="w-3.5 h-3.5 text-[var(--fg-primary)]"
                           aria-hidden="true"
                         />
                       </div>
@@ -695,32 +755,41 @@ export default function LandingPage() {
           </div>
 
           {/* Pipeline visualization */}
-          <div className="max-w-3xl mx-auto">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="max-w-5xl mx-auto">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
               {FLOW_STEPS.map((step, i) => (
-                <div key={step.label} className="text-center">
+                <div key={step.label} className="relative group">
                   <div
-                    className="brutalist-card-sm p-4 mb-2"
-                    style={{ borderColor: step.color }}
+                    className="brutalist-card-sm p-3.5 h-full flex flex-col justify-between border-2 border-[var(--border-primary)] shadow-[var(--shadow-brutalist-sm)] transition-transform duration-200 group-hover:-translate-y-0.5"
+                    style={{
+                      background: "var(--bg-surface)",
+                      borderTop: `4px solid ${step.accent}`,
+                    }}
                   >
+                    <div className="flex items-center justify-between mb-2">
+                      <span
+                        className="text-[10px] font-mono font-bold tracking-widest"
+                        style={{ color: "var(--fg-tertiary)" }}
+                      >
+                        {step.num}
+                      </span>
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ background: step.accent }}
+                      />
+                    </div>
                     <span
-                      className="text-caption block mb-1"
-                      style={{ color: "var(--fg-tertiary)" }}
-                    >
-                      {step.num}
-                    </span>
-                    <span
-                      className="text-caption font-bold block"
-                      style={{ color: step.color }}
+                      className="text-xs font-black tracking-wider uppercase block text-center"
+                      style={{ color: "var(--fg-primary)" }}
                     >
                       {step.label}
                     </span>
                   </div>
+                  {/* Connector arrow on mobile/tablet */}
                   {i < FLOW_STEPS.length - 1 && (
-                    <div className="flex justify-center sm:hidden py-1">
-                      <ArrowDown
-                        className="w-3 h-3 connector-pulse"
-                        style={{ color: step.color }}
+                    <div className="hidden lg:flex absolute -right-2 top-1/2 -translate-y-1/2 z-10 pointer-events-none">
+                      <ArrowRight
+                        className="w-3 h-3 text-[var(--fg-secondary)]"
                         aria-hidden="true"
                       />
                     </div>
@@ -1178,38 +1247,39 @@ export default function LandingPage() {
       {/* FINAL CTA                                      */}
       {/* ═══════════════════════════════════════════════ */}
       <section
-        className="border-t-2 border-[var(--border-primary)]"
-        style={{ background: "var(--accent-primary)" }}
+        className="border-t-2 border-b-2 border-[var(--border-primary)] relative overflow-hidden"
       >
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 text-center">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 text-center relative z-10">
+          <div className="inline-flex items-center gap-2 px-3 py-1 mb-6 border-2 border-[var(--border-primary)] bg-[var(--bg-surface)] shadow-[var(--shadow-brutalist-sm)]">
+            <Zap className="w-3.5 h-3.5 text-[var(--accent-secondary)]" aria-hidden="true" />
+            <span className="text-[11px] font-mono font-black uppercase tracking-wider text-[var(--fg-primary)]">
+              ENTERPRISE MULTI-AGENT PLATFORM
+            </span>
+          </div>
+
           <h2
-            className="text-h1 mb-2"
-            style={{ color: "var(--fg-on-accent)" }}
+            className="text-h1 mb-3 max-w-3xl mx-auto"
+            style={{ color: "var(--fg-primary)" }}
           >
-            The Next Generation
+            The Next Generation of AI Workflows Starts Here.
           </h2>
-          <h2
-            className="text-h1 mb-6"
-            style={{ color: "var(--fg-on-accent)", opacity: 0.8 }}
-          >
-            Of AI Workflows Starts Here.
-          </h2>
+
           <p
             className="text-body max-w-xl mx-auto mb-8"
-            style={{ color: "rgba(17,17,17,0.7)" }}
+            style={{ color: "var(--fg-secondary)" }}
           >
-            Turn complex tasks into coordinated intelligence.
+            Turn complex tasks into autonomous, coordinated intelligence with deterministic verification.
           </p>
+
           <div className="flex flex-wrap items-center justify-center gap-4">
-            <Link href="/app" className="brutalist-btn brutalist-btn-dark">
+            <Link href="/app" className="brutalist-btn brutalist-btn-primary">
               <Zap className="w-4 h-4" aria-hidden="true" />
               Launch MultiAgent OS
               <ArrowRight className="w-4 h-4" aria-hidden="true" />
             </Link>
             <Link
               href="/login"
-              className="text-sm font-bold uppercase tracking-wide underline underline-offset-4"
-              style={{ color: "var(--fg-on-accent)" }}
+              className="brutalist-btn brutalist-btn-secondary"
             >
               Sign In
             </Link>

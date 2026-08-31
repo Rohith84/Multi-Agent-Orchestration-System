@@ -103,7 +103,7 @@ class ArtifactService:
             raise ValueError(f"Artifact {artifact_id} not found")
         return ArtifactSchema.model_validate(art)
 
-    async def list_artifacts() -> list[ArtifactSchema]:
+    async def list_artifacts(self) -> list[ArtifactSchema]:
         """List all artifacts for session."""
         result = await self.db.execute(
             select(Artifact)

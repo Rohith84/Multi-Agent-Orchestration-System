@@ -70,7 +70,7 @@ export function ChatInput({ onSend, disabled, value, onChangeValue }: ChatInputP
         textareaRef.current.style.height = "auto";
       }
     }
-  }, [input, disabled, onSend, setInput]);
+  }, [input, disabled, onSend, setInput, mode]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

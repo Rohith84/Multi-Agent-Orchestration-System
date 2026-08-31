@@ -36,25 +36,28 @@ class OllamaClient:
         self,
         messages: list[dict[str, str]],
         model: str | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """
         Send a chat completion request to Groq API or local Ollama.
         """
         model = model or self.model_name
+        max_tokens = max_tokens or 4096
 
         if self.groq_api_key:
             try:
-                return await self._chat_groq(messages, model)
+                return await self._chat_groq(messages, model, max_tokens)
             except Exception as e:
                 logger.warning("Groq API call failed (%s). Falling back to local Ollama.", e)
-                return await self._chat_ollama(messages, "qwen2.5-coder:3b")
+                return await self._chat_ollama(messages, "qwen2.5-coder:3b", max_tokens)
 
-        return await self._chat_ollama(messages, model)
+        return await self._chat_ollama(messages, model, max_tokens)
 
     async def _chat_groq(
         self,
         messages: list[dict[str, str]],
         model: str,
+        max_tokens: int,
     ) -> str:
         """Send request to Groq Cloud OpenAI-compatible Endpoint."""
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -66,7 +69,7 @@ class OllamaClient:
             "model": model,
             "messages": messages,
             "temperature": 0.2,
-            "max_tokens": 8192,
+            "max_tokens": max_tokens,
         }
 
         logger.info(
@@ -97,6 +100,7 @@ class OllamaClient:
         self,
         messages: list[dict[str, str]],
         model: str,
+        max_tokens: int,
     ) -> str:
         """Send chat completion request to local Ollama."""
         url = f"{self.base_url}/api/chat"
@@ -109,7 +113,7 @@ class OllamaClient:
             "options": {
                 "num_gpu": 99,
                 "num_ctx": 8192,
-                "num_predict": 4096,
+                "num_predict": max_tokens,
                 "temperature": 0.2,
             },
         }

@@ -112,7 +112,6 @@ export function useChat() {
         });
         setExecutions(newExecutions);
       } catch (error: any) {
-        console.error("Failed to load chat history:", error);
         if (error?.response?.status === 404) {
           window.localStorage.removeItem(LAST_SESSION_STORAGE_KEY);
           if (typeof window !== "undefined") {
@@ -120,6 +119,8 @@ export function useChat() {
             url.searchParams.delete("session");
             window.history.replaceState(null, "", url.pathname + url.search);
           }
+        } else {
+          console.error("Failed to load chat history:", error);
         }
       }
     },
@@ -128,9 +129,10 @@ export function useChat() {
 
   useEffect(() => {
     const querySession = new URLSearchParams(window.location.search).get("session");
-    const rememberedSession = window.localStorage.getItem(LAST_SESSION_STORAGE_KEY);
-    const sid = querySession || rememberedSession;
-    if (sid) void loadHistory(sid);
+    // Only load history if explicitly requested via query parameter ?session=...
+    if (querySession) {
+      void loadHistory(querySession);
+    }
   }, [loadHistory]);
 
   // Delete current session
@@ -182,7 +184,10 @@ export function useChat() {
           return;
         }
 
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const API_URL =
+          process.env.NEXT_PUBLIC_BACKEND_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          "http://localhost:8000";
         const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
         const headers: Record<string, string> = {
           "Content-Type": "application/json",

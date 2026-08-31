@@ -76,8 +76,9 @@ export default function LoginPage() {
         },
       });
 
-      // Save token and user info
+      // Save token and user info, clearing previous chat session
       if (data && data.access_token) {
+        localStorage.removeItem("multiagent:last-chat-session");
         localStorage.setItem("access_token", data.access_token);
         localStorage.setItem("user_email", data.email || "");
         localStorage.setItem("user_role", data.role || "");

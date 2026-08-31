@@ -43,12 +43,17 @@ api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response) {
-      console.error(
-        `API Error: ${error.response.status} - ${error.response.statusText}`
-      );
+      if (error.response.status !== 404) {
+        console.error(
+          `API Error: ${error.response.status} - ${error.response.statusText}`
+        );
+      }
       if (error.response.status === 401) {
         if (typeof window !== "undefined") {
           localStorage.removeItem("access_token");
+          localStorage.removeItem("multiagent:last-chat-session");
+          localStorage.removeItem("user_email");
+          localStorage.removeItem("user_role");
           if (!window.location.pathname.startsWith("/login")) {
             window.location.href = "/login";
           }

@@ -16,7 +16,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -34,6 +34,7 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  LogOut,
   type LucideIcon,
 } from "lucide-react";
 
@@ -117,6 +118,16 @@ export function AppSidebar({
     return pathname.startsWith(href);
   };
 
+  const handleLogout = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("multiagent:last-chat-session");
+      localStorage.removeItem("user_email");
+      localStorage.removeItem("user_role");
+      router.push("/login");
+    }
+  };
+
   const navContent = (
     <div className="flex flex-col h-full">
       {/* Sidebar Header — Brand */}
@@ -194,18 +205,34 @@ export function AppSidebar({
         ))}
       </div>
 
-      {/* Sidebar Footer Indicator */}
-      {!collapsed && (
-        <div className="p-3 border-t-2 border-[var(--border-primary)] shrink-0"
-             style={{ background: "var(--bg-secondary)" }}>
+      {/* Sidebar Footer — Status Indicator & Logout */}
+      <div className="p-3 border-t-2 border-[var(--border-primary)] shrink-0 space-y-2"
+           style={{ background: "var(--bg-secondary)" }}>
+        {!collapsed && (
           <div className="flex items-center gap-2">
             <div className="status-dot status-dot-online" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--fg-secondary)]">
               5 Agents Ready
             </span>
           </div>
-        </div>
-      )}
+        )}
+
+        <button
+          onClick={handleLogout}
+          className={`
+            w-full flex items-center ${collapsed ? "justify-center" : "justify-between"} px-2.5 py-1.5 
+            border-2 border-[var(--border-secondary)] hover:border-[var(--accent-error)] 
+            bg-[var(--bg-surface)] text-[var(--fg-secondary)] hover:text-[var(--accent-error)] 
+            text-xs font-bold transition-colors shadow-[var(--shadow-brutalist-sm)]
+          `}
+          title="Log Out & Clear Session"
+        >
+          <div className="flex items-center gap-2">
+            <LogOut className="w-3.5 h-3.5" />
+            {!collapsed && <span>Log Out</span>}
+          </div>
+        </button>
+      </div>
     </div>
   );
 

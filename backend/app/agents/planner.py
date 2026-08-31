@@ -12,6 +12,8 @@ from app.ai.ollama_client import OllamaClient
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.knowledge.vectorstore.planning_memory import PlanningMemoryStore
+from app.schemas.contracts import PlanContract
+from app.orchestration.plan_validator import PlanContractValidator, PlanValidationResult
 
 if TYPE_CHECKING:
     from app.mcp.clients.tool_runner import MCPToolRunner
@@ -19,10 +21,35 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+class PlannerResult:
+    """Structured result returned by PlannerAgent."""
+
+    def __init__(
+        self,
+        raw_output: str,
+        is_valid: bool,
+        contract: PlanContract | None = None,
+        errors: list[str] | None = None,
+    ) -> None:
+        self.raw_output = raw_output
+        self.is_valid = is_valid
+        self.contract = contract
+        self.errors = errors or []
+        if contract:
+            self.formatted_plan = contract.to_markdown()
+        else:
+            err_text = "; ".join(self.errors) if self.errors else "Unknown validation error"
+            self.formatted_plan = (
+                f"### Plan Validation Error (Rejected by Plan Contract)\n"
+                f"{err_text}\n\n"
+                f"Original Output:\n{raw_output}"
+            )
+
+
 class PlannerAgent:
     """
     Planner Agent is responsible for analyzing requirements, planning execution steps,
-    reusing prior architectural plans from memory, and outputting a clear task decomposition list.
+    reusing prior architectural plans from memory, and outputting a validated PlanContract.
     """
 
     def __init__(self, client: OllamaClient) -> None:
@@ -31,12 +58,15 @@ class PlannerAgent:
         self.model = self.settings.model_planner
         self.memory_store = PlanningMemoryStore()
 
-    async def execute(
+    async def execute_contract(
         self,
         user_request: str,
         history: list[dict[str, str]] | None = None,
         tool_runner: MCPToolRunner | None = None,
-    ) -> str:
+    ) -> PlannerResult:
+        """
+        Execute planner and return a validated PlannerResult with PlanContract.
+        """
         logger.info("Executing Planner Agent with model=%s", self.model)
 
         # 1. Retrieve similar past plans from Planning Memory
@@ -45,7 +75,7 @@ class PlannerAgent:
             similar_plans = await self.memory_store.search_similar_plans(user_request, top_k=2)
             if similar_plans:
                 plan_snippets = []
-                for idx, p in enumerate(similar_plans):
+                for p in similar_plans:
                     plan_snippets.append(
                         f"--- Prior Similar Goal (Similarity: {p['similarity_score']}) ---\n"
                         f"Goal: {p['goal']}\nPlan Snippet:\n{p['plan'][:400]}..."
@@ -75,58 +105,34 @@ class PlannerAgent:
         system_prompt = (
             "You are the Planner Agent in a multi-agent orchestration system.\n\n"
             "## Role\n"
-            "You analyze the user's request and produce a structured execution plan for downstream agents "
-            "(Research, Coding, Testing, Reviewer). You do NOT implement, test, or review anything yourself.\n\n"
-            "## Responsibilities\n"
-            "- Understand the user's actual objective and identify the task type (coding, research, documentation, debugging, etc.).\n"
-            "- Break complex requests into logical, ordered subtasks with clear dependencies.\n"
-            "- Determine which downstream agents are required (not every task needs all agents).\n"
-            "- Identify required tools, project context, or external information.\n"
-            "- Provide enough context for each downstream agent to act without re-interpreting the original request.\n"
-            "- If relevant prior plans are provided from memory, leverage their architectural decisions and improve upon them.\n\n"
-            "## Rules\n"
-            "- Do NOT write implementation code.\n"
-            "- Do NOT fabricate project requirements, files, dependencies, or APIs that are not provided or discoverable.\n"
-            "- Keep plans proportional to task complexity — simple tasks get simple plans.\n"
-            "- Clearly identify dependencies between subtasks.\n"
-            "- If required information is missing, explicitly state what is unknown rather than assuming.\n"
-            "- Do NOT perform work that belongs to another specialized agent.\n\n"
-            "## Output Format\n"
-            "Return a structured plan containing:\n"
-            "- **Task Summary**: One-line description of what needs to be done.\n"
-            "- **Task Type**: coding / research / documentation / debugging / refactoring / other.\n"
-            "- **Complexity**: low / medium / high.\n"
-            "- **Required Agents**: Which agents should execute (Research, Coder, Tester, Reviewer).\n"
-            "- **Subtasks**: Numbered list of concrete, actionable subtasks.\n"
-            "- **Execution Order**: The sequence in which subtasks should be completed.\n"
-            "- **Required Context**: What information or project files each agent will need.\n"
-            "- **Required Tools**: Any tools, APIs, or external resources needed.\n"
-            "- **Risks or Unknowns**: Anything that could block execution or requires clarification.\n\n"
-            "### For Coding Tasks, you MUST also include:\n"
-            "- **File Manifest**: An explicit list of EVERY file to be created, with its purpose. Example:\n"
-            "    - `backend/app/models/task.py` — SQLAlchemy model for Task\n"
-            "    - `backend/app/schemas/task.py` — Pydantic schemas (TaskCreate, TaskRead, TaskUpdate)\n"
-            "    - `backend/app/api/v1/task.py` — FastAPI router with CRUD endpoints\n"
-            "    - `requirements.txt` — Python dependencies\n"
-            "    - `tests/test_task.py` — pytest test suite\n"
-            "  The Coder Agent will use this file manifest as a checklist — if a file is not listed, it will NOT be created.\n\n"
-            "- **Database Design**: Table names, columns with types, relationships, constraints, and defaults.\n\n"
-            "- **API Specification**: Endpoints, HTTP methods, request/response bodies, status codes. Example:\n"
-            "    - `POST /api/tasks` — Create task (201), body: {title, description, priority}\n"
-            "    - `GET /api/tasks` — List all tasks (200)\n"
-            "    - `GET /api/tasks/{id}` — Get single task (200/404)\n\n"
-            "- **Dependency List**: All required packages (e.g., fastapi, sqlalchemy, pydantic, pytest).\n\n"
-            "- **Acceptance Criteria**: Concrete, testable conditions that define 'done'. Example:\n"
-            "    - POST /tasks creates a task and returns 201\n"
-            "    - GET /tasks returns a list of all tasks\n"
-            "    - The test suite has >= 3 passing tests\n"
-            "    - All files pass Python syntax validation\n\n"
-            "At the very end of your response, you MUST output a single, separate line with exactly this format:\n"
-            "REQUIRED_AGENTS: agent1, agent2, ...\n"
-            "Include only the names of agents that are strictly necessary for the user's specific request. Choices are: research, coder, tester, reviewer. (Note: coder and tester should always be used together for coding tasks. planner is always run first and is implicit, do not list it).\n"
-            "Example final line:\n"
-            "REQUIRED_AGENTS: research, reviewer\n\n"
-            "Keep the plan concise, actionable, and technically precise."
+            "You analyze the user request and generate a structured execution plan conforming to the PlanContract schema.\n"
+            "You do NOT write implementation code, test code, or review.\n\n"
+            "## Requirements\n"
+            "- Subtasks: You MUST provide strictly between 3 and 6 discrete, non-duplicate subtasks.\n"
+            "- Allowed agents: 'research', 'coder', 'tester', 'reviewer'.\n"
+            "- For coding/building tasks, include 'research', 'coder', 'tester', 'reviewer'.\n"
+            "- Every subtask MUST have a unique 'id', assigned 'agent', concrete 'description', and 'dependencies' array.\n"
+            "- Include 'file_manifest' listing all files to create.\n"
+            "- Include 'acceptance_criteria' with concrete testable criteria.\n\n"
+            "## Output Format (JSON)\n"
+            "Return valid JSON matching this schema:\n"
+            "```json\n"
+            "{\n"
+            '  "task_summary": "One-line task summary",\n'
+            '  "task_type": "coding",\n'
+            '  "complexity": "medium",\n'
+            '  "required_agents": ["research", "coder", "tester", "reviewer"],\n'
+            '  "subtasks": [\n'
+            '    {"id": 1, "agent": "research", "description": "Research requirements and specs", "dependencies": []},\n'
+            '    {"id": 2, "agent": "coder", "description": "Implement core logic and modules", "dependencies": [1]},\n'
+            '    {"id": 3, "agent": "tester", "description": "Create and run unit test suite", "dependencies": [2]},\n'
+            '    {"id": 4, "agent": "reviewer", "description": "Review quality and architectural evidence", "dependencies": [3]}\n'
+            "  ],\n"
+            '  "file_manifest": ["app/main.py", "tests/test_main.py"],\n'
+            '  "acceptance_criteria": ["All tests pass cleanly", "No linter errors"]\n'
+            "}\n"
+            "```\n"
+            "Strict rule: Never generate more than 6 subtasks. Never duplicate subtasks."
         )
 
         messages = [
@@ -136,7 +142,7 @@ class PlannerAgent:
         if history:
             messages.extend(history)
 
-        prompt = f"Please plan the execution for this request:\n\n{user_request}"
+        prompt = f"Please generate a structured PlanContract for this request:\n\n{user_request}"
         if memory_context:
             prompt += memory_context
         if project_context:
@@ -144,5 +150,31 @@ class PlannerAgent:
 
         messages.append({"role": "user", "content": prompt})
 
-        response = await self.client.chat(messages, model=self.model)
-        return response
+        raw_response = await self.client.chat(messages, model=self.model, max_tokens=1200)
+
+        # 3. Deterministic Plan Contract Validation
+        val_result: PlanValidationResult = PlanContractValidator.validate(raw_response)
+
+        return PlannerResult(
+            raw_output=raw_response,
+            is_valid=val_result.is_valid,
+            contract=val_result.contract,
+            errors=val_result.errors,
+        )
+
+    async def execute(
+        self,
+        user_request: str,
+        history: list[dict[str, str]] | None = None,
+        tool_runner: MCPToolRunner | None = None,
+    ) -> str:
+        """
+        Main execution endpoint for PlannerAgent.
+        Returns the validated formatted plan string or the rejection summary.
+        """
+        result = await self.execute_contract(
+            user_request=user_request,
+            history=history,
+            tool_runner=tool_runner,
+        )
+        return result.formatted_plan

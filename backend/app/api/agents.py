@@ -81,7 +81,12 @@ async def get_workflow_history(
     executions = await agent_repo.get_session_executions(sid)
 
     if not chat_exists and len(executions) == 0:
-        raise HTTPException(status_code=404, detail="Session not found")
+        return AgentHistoryResponse(
+            session_id=session_id,
+            chat_history=[],
+            agent_executions=[],
+            execution_order=[],
+        )
 
     messages = await chat_repo.get_history(sid)
 
@@ -141,7 +146,12 @@ async def delete_workflow_history(
     executions = await agent_repo.get_session_executions(sid)
 
     if not chat_exists and len(executions) == 0:
-        raise HTTPException(status_code=404, detail="Session not found")
+        return {
+            "message": "Workflow history deleted successfully.",
+            "session_id": session_id,
+            "deleted_messages": 0,
+            "deleted_executions": 0,
+        }
 
     deleted_msgs = await chat_repo.delete_session(sid)
     deleted_execs = await agent_repo.delete_session_executions(sid)

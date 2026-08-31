@@ -1,14 +1,12 @@
 """
 Tester Agent.
-Detects project framework, executes unit tests (pytest / unittest), captures logs, and builds structured BugReports for self-repair loops.
+Generates comprehensive test scripts, writes them to the workspace, and analyzes test coverage quality.
+Does NOT execute tests — the Internal Quality Gate owns pytest execution.
 """
 
 from __future__ import annotations
 
-import asyncio
 import re
-import sys
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -25,7 +23,9 @@ logger = get_logger(__name__)
 
 class TesterAgent:
     """
-    Tester Agent runs real test suites, captures execution output, and builds bug reports.
+    Tester Agent generates test scripts, writes them to the workspace sandbox,
+    and analyzes test coverage quality. It does NOT execute tests — the Internal
+    Quality Gate handles deterministic test execution.
     """
 
     def __init__(self, client: OllamaClient) -> None:
@@ -39,51 +39,62 @@ class TesterAgent:
         execution_plan: str,
         workspace_service: WorkspaceService | None = None,
         tool_runner: MCPToolRunner | None = None,
+        validation_results: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Execute tests and return detailed results dictionary with text output, status, and bug report.
+        Generate test scripts, write to workspace, and analyze coverage quality.
+
+        Args:
+            generated_code: The code produced by the Coder Agent.
+            execution_plan: The Planner's execution plan.
+            workspace_service: Workspace to write test files into.
+            tool_runner: MCP tool runner (optional).
+            validation_results: Pre-computed Quality Gate results (if available from prior validation).
+
+        Returns:
+            Dictionary with 'output' (analysis text), 'tester_analysis' (coverage assessment).
         """
         logger.info("Executing Tester Agent with model=%s", self.model)
 
-        # 1. Ask LLM to analyze code & generate pytest test script
+        # 1. Ask LLM to generate pytest test scripts
         system_prompt = (
             "You are the Testing Agent in a multi-agent orchestration system.\n\n"
             "## Role\n"
-            "You validate the implementation produced by the Coding Agent. Testing is an actual validation stage, "
-            "not simply another LLM review. You write tests and analyze execution results.\n\n"
+            "You generate comprehensive test suites and analyze test coverage quality. "
+            "You do NOT execute tests — a separate deterministic Quality Gate handles test execution.\n\n"
             "## Responsibilities\n"
-            "- Inspect the generated implementation and identify expected behavior and edge cases.\n"
-            "- Create comprehensive pytest test scripts that validate correctness.\n"
-            "- Test important normal cases, relevant edge cases, and error/failure conditions.\n"
-            "- Analyze actual test execution results when available.\n"
-            "- Identify failures, their likely root causes, and recommended fixes.\n"
-            "- Report whether the implementation passes validation honestly.\n\n"
-            "## Rules\n"
-            "- NEVER claim a test passed without actual execution evidence.\n"
-            "- Do NOT mark code as correct solely because it looks correct.\n"
-            "- Avoid meaningless tests that only reproduce implementation details without validating behavior.\n"
-            "- Do NOT modify production code — only create test code.\n"
-            "- Clearly distinguish: tests created vs. tests executed vs. tests passed vs. tests failed.\n"
-            "- If you cannot execute tests, state that explicitly.\n\n"
+            "1. **Generate Tests**: Create comprehensive pytest test scripts that validate the implementation.\n"
+            "2. **Analyze Coverage**: Assess whether the generated tests adequately cover the requirements.\n\n"
+            "## Test Generation Rules\n"
+            "- Create tests for all important functionality.\n"
+            "- Test success paths, failure paths, and edge cases.\n"
+            "- Tests MUST be isolated and independent — no execution order dependencies.\n"
+            "- DO NOT hardcode static database IDs (e.g., ID 1). Create test items dynamically.\n"
+            "- DO NOT assume pre-existing database state.\n"
+            "- Place all explanations OUTSIDE code blocks.\n"
+            "- Code blocks MUST contain ONLY valid Python pytest source code.\n\n"
+            "## Coverage Analysis Output\n"
+            "After generating tests, provide a coverage analysis:\n"
+            "- **Requirements Covered**: Which requirements from the plan are tested?\n"
+            "- **Requirements NOT Covered**: Which requirements lack tests?\n"
+            "- **Edge Cases Tested**: What edge cases are covered?\n"
+            "- **Missing Edge Cases**: What edge cases are NOT covered?\n"
+            "- **Test Isolation**: Are all tests properly isolated?\n"
+            "- **Test Determinism**: Are tests deterministic (no randomness, no external dependencies)?\n"
+            "- **Coverage Assessment**: ADEQUATE / PARTIAL / INSUFFICIENT\n\n"
             "## Output Format\n"
             "First, output test files using annotated code blocks:\n"
             "```python filepath=\"test_suite.py\"\n"
             "import pytest\n"
             "# tests here\n"
             "```\n\n"
-            "Then provide:\n"
-            "- **Test Summary**: What was tested and why.\n"
-            "- **Tests Created**: List of test functions written.\n"
-            "- **Validation Status**: PASS / FAIL / PARTIAL / NOT_EXECUTED.\n"
-            "- **Failure Analysis**: Root cause analysis for any failures.\n"
-            "- **Recommended Fixes**: Specific fixes for the Coding Agent if tests fail.\n\n"
-            "The validation status must accurately reflect actual execution results, not assumptions."
+            "Then provide the coverage analysis.\n"
         )
 
         prompt = (
-            f"Execution Plan:\n{execution_plan}\n\n"
-            f"Generated Code:\n{generated_code}\n\n"
-            "Please generate complete pytest unit test scripts."
+            f"Execution Plan:\n{execution_plan[:2000]}\n\n"
+            f"Generated Code:\n{generated_code[:3000]}\n\n"
+            "Please generate comprehensive pytest unit test scripts and provide a coverage analysis."
         )
 
         messages = [
@@ -91,90 +102,37 @@ class TesterAgent:
             {"role": "user", "content": prompt},
         ]
 
-        llm_analysis = await self.client.chat(messages, model=self.model)
+        llm_analysis = await self.client.chat(messages, model=self.model, max_tokens=1800)
 
         # Write test files to workspace sandbox if available
         if workspace_service:
-            pattern = r"```([a-zA-Z0-9_-]*)\s+(?:filepath|file)=[\"']?([^\"'\s\n>]+)[\"']?\n(.*?)```"
-            matches = re.findall(pattern, llm_analysis, re.DOTALL)
-            for lang, rel_path, content in matches:
-                if "test" in rel_path.lower():
-                    await workspace_service.write_file(rel_path.strip(), content.strip(), "python")
+            from app.utils.artifact_extractor import extract_code_artifacts
+            artifacts = extract_code_artifacts(llm_analysis)
+            for artifact in artifacts:
+                if "test" in artifact.path.lower() or artifact.path.endswith(".py"):
+                    await workspace_service.write_file(artifact.path, artifact.content, artifact.language)
 
-        # 2. Run real pytest test execution against sandbox workspace
-        test_run_res = await self._run_pytest_subprocess(workspace_service)
-
-        passed = test_run_res["passed"]
-        bug_report = None
-
-        if not passed:
-            # Parse specific error info from pytest output for better repair hints
-            combined_output = (test_run_res["stderr"] or "") + (test_run_res["stdout"] or "")
-            error_category = self._classify_error(combined_output)
-            failed_test = self._extract_failed_test(combined_output)
-            suggested_fix = self._build_suggested_fix(error_category, combined_output)
-
-            bug_report = {
-                "failed_file": str((workspace_service.workspace_dir if workspace_service else SANDBOX_DIR) / "main.py"),
-                "failed_test": failed_test,
-                "stack_trace": combined_output[:1500],
-                "error_category": error_category,
-                "suggested_fix": suggested_fix,
-                "severity": "HIGH",
-            }
-
+        # Build output text
         text_output = (
             f"{llm_analysis}\n\n"
-            f"--- REAL PYTEST EXECUTION RESULT ---\n"
-            f"Status: {'PASSED' if passed else 'FAILED'}\n"
-            f"Execution Time: {test_run_res['execution_time']}s\n"
-            f"Stdout:\n{test_run_res['stdout'][:800]}\n"
-            f"Stderr:\n{test_run_res['stderr'][:800]}\n"
+            f"--- TESTER AGENT SUMMARY ---\n"
+            f"Role: Test Generation & Coverage Analysis\n"
+            f"Tests Generated: YES (written to workspace for Quality Gate execution)\n"
         )
+
+        # If validation_results are available, include them in analysis context
+        if validation_results:
+            pytest_info = validation_results.get("pytest", {})
+            text_output += (
+                f"\n--- QUALITY GATE PYTEST EVIDENCE (read-only) ---\n"
+                f"Pytest Status: {pytest_info.get('status', 'NOT_AVAILABLE')}\n"
+                f"Pytest Output:\n{pytest_info.get('output', 'No output available')[:600]}\n"
+            )
 
         return {
             "output": text_output,
-            "passed": passed,
-            "execution_time": test_run_res["execution_time"],
-            "stdout": test_run_res["stdout"],
-            "stderr": test_run_res["stderr"],
-            "bug_report": bug_report,
+            "tester_analysis": llm_analysis,
         }
-
-    async def _run_pytest_subprocess(self, workspace_service: WorkspaceService | None = None) -> dict[str, Any]:
-        """Execute pytest against sandbox_workspace/ via subprocess."""
-        start = time.time()
-        sandbox_path = (workspace_service.workspace_dir if workspace_service else SANDBOX_DIR).resolve()
-
-        if not sandbox_path.exists():
-            sandbox_path.mkdir(parents=True, exist_ok=True)
-
-        test_files = list(sandbox_path.rglob("test_*.py")) + list(sandbox_path.rglob("*_test.py"))
-        if not test_files:
-            return {
-                "passed": False,
-                "exit_code": None,
-                "stdout": "",
-                "stderr": "No generated test files were found in the session workspace.",
-                "execution_time": round(time.time() - start, 2),
-            }
-
-        try:
-            from app.utils.sandbox import SecureExecutor
-            executor = SecureExecutor(timeout=30.0)
-            cmd = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", str(sandbox_path)]
-            res = await executor.execute_command(cmd, sandbox_path)
-            return res
-        except Exception as e:
-            logger.warning("Pytest subprocess execution failed: %s", e)
-            return {
-                "passed": False,
-                "exit_code": None,
-                "stdout": f"Test runner output: {e}",
-                "stderr": "",
-                "execution_time": 0.1,
-                "timeout_triggered": False,
-            }
 
     @staticmethod
     def _classify_error(output: str) -> str:
@@ -187,7 +145,6 @@ class TesterAgent:
             ("TypeError", "TypeError"),
             ("AttributeError", "AttributeError"),
             ("FileNotFoundError", "FileNotFoundError"),
-            ("AssertionError", "AssertionError"),
             ("AssertionError", "AssertionError"),
             ("ValueError", "ValueError"),
             ("KeyError", "KeyError"),
@@ -205,7 +162,7 @@ class TesterAgent:
     def _extract_failed_test(output: str) -> str:
         """Extract the name of the first failing test from pytest output."""
         # Match patterns like "FAILED test_file.py::test_name"
-        match = re.search(r"FAILED\s+([\w/\\.-]+(?:::[\w]+)?)", output)
+        match = re.search(r"FAILED\s+([\w/\\.-]+(?:::[\\w]+)?)", output)
         if match:
             return match.group(1)
         # Match patterns like "ERROR test_file.py"

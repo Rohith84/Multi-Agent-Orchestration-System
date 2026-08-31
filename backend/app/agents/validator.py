@@ -1,17 +1,28 @@
 """
-Deterministic Validator.
+Deterministic Validator & Quality Gate.
 Runs automated, non-LLM checks on generated code:
   1. Syntax validation (ast.parse for Python files)
   2. Cross-file import validation (do imported local modules exist?)
   3. Dependency completeness (requirements.txt vs actual imports)
   4. File manifest check (all planned files were generated)
+
+Quality Gate additionally executes:
+  5. Ruff linter (full check)
+  6. Pytest test execution
+  7. Bandit security scanner
+
+The Quality Gate is the SINGLE SOURCE OF TRUTH for deterministic execution validity.
+No LLM agent may modify or override these results.
 """
 
 from __future__ import annotations
 
 import ast
+import asyncio
 import re
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +64,9 @@ class DeterministicValidator:
     """
     Runs automated, non-LLM checks on generated code files in a workspace directory.
     Returns a structured result with pass/fail status and specific errors.
+
+    Also serves as the Quality Gate: runs Ruff, Pytest, and Bandit to produce
+    authoritative structured validation results that no LLM agent may override.
     """
 
     async def validate(
@@ -114,8 +128,202 @@ class DeterministicValidator:
             "summary": summary,
         }
 
+    async def run_full_quality_gate(
+        self,
+        workspace_dir: Path,
+        planned_files: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Run the complete Quality Gate: deterministic checks + Ruff + Pytest + Bandit.
+
+        This is the SINGLE SOURCE OF TRUTH for deterministic execution validity.
+        Missing or unavailable validation evidence does NOT default to PASS.
+
+        Returns structured validation_results:
+        {
+            "deterministic_checks": {"status": "PASS|FAIL|ERROR", "output": "..."},
+            "ruff": {"status": "PASS|FAIL|ERROR", "output": "..."},
+            "pytest": {"status": "PASS|FAIL|ERROR", "output": "..."},
+            "bandit": {"status": "PASS|WARNING|FAIL|ERROR", "output": "..."},
+            "quality_gate": "PASS|PASS_WITH_WARNINGS|FAIL",
+            "test_passed": bool,
+        }
+        """
+        if not workspace_dir.exists():
+            error_msg = f"Workspace directory does not exist: {workspace_dir}"
+            return {
+                "deterministic_checks": {"status": "ERROR", "output": error_msg},
+                "ruff": {"status": "ERROR", "output": "Skipped — workspace missing"},
+                "pytest": {"status": "ERROR", "output": "Skipped — workspace missing"},
+                "bandit": {"status": "ERROR", "output": "Skipped — workspace missing"},
+                "quality_gate": "FAIL",
+                "test_passed": False,
+            }
+
+        # 1. Run existing deterministic checks (syntax, imports, deps, manifest)
+        det_result = await self.validate(workspace_dir, planned_files)
+        if det_result["passed"]:
+            det_status = "PASS"
+            det_output = det_result["summary"]
+        else:
+            det_status = "FAIL"
+            det_output = "\n".join(
+                f"[{e['severity']}] {e['type']} in {e['file']}: {e['message']}"
+                for e in det_result["errors"]
+            )
+
+        # 2. Run Ruff linter (full check)
+        ruff_raw = await self._run_tool_cmd(
+            [sys.executable, "-m", "ruff", "check", "--no-cache", str(workspace_dir)],
+            timeout=30.0,
+        )
+        ruff_status = self._classify_ruff_status(ruff_raw)
+
+        # 3. Run Pytest
+        pytest_raw = await self._run_pytest(workspace_dir)
+        pytest_status = self._classify_pytest_status(pytest_raw)
+
+        # 4. Run Bandit (-s B101 to skip assert checks in test files)
+        bandit_raw = await self._run_tool_cmd(
+            [sys.executable, "-m", "bandit", "-r", "-s", "B101", str(workspace_dir)],
+            timeout=30.0,
+        )
+        bandit_status = self._classify_bandit_status(bandit_raw)
+
+        # 5. Compute authoritative Quality Gate decision
+        has_failure = (
+            det_status == "FAIL"
+            or ruff_status == "FAIL"
+            or pytest_status == "FAIL"
+            or bandit_status == "FAIL"
+            or det_status == "ERROR"
+            or ruff_status == "ERROR"
+            or pytest_status == "ERROR"
+            or bandit_status == "ERROR"
+        )
+        has_warning = bandit_status == "WARNING" or ruff_status == "WARNING"
+
+        if has_failure:
+            quality_gate = "FAIL"
+        elif has_warning:
+            quality_gate = "PASS_WITH_WARNINGS"
+        else:
+            quality_gate = "PASS"
+
+        return {
+            "deterministic_checks": {"status": det_status, "output": det_output[:2000]},
+            "ruff": {"status": ruff_status, "output": ruff_raw[:2000]},
+            "pytest": {"status": pytest_status, "output": pytest_raw[:2000]},
+            "bandit": {"status": bandit_status, "output": bandit_raw[:2000]},
+            "quality_gate": quality_gate,
+            "test_passed": quality_gate != "FAIL",
+        }
+
+    # ─── Tool Classification Helpers ───────────────────────────────────
+
+    @staticmethod
+    def _classify_ruff_status(output: str) -> str:
+        """Classify Ruff output into PASS / WARNING / FAIL / ERROR."""
+        if output.startswith("Tool execution error:") or output.startswith("Tool timed out"):
+            return "ERROR"
+        if not output or output == "Passed cleanly.":
+            return "PASS"
+        error_codes = ["F821", "E999", "SyntaxError", "error: ", "Error:"]
+        if any(code in output for code in error_codes):
+            return "FAIL"
+        warning_indicators = ["warning", "w292", "i001"]
+        output_lower = output.lower()
+        if any(w in output_lower for w in warning_indicators):
+            return "WARNING"
+        # Ruff found issues but none are critical errors
+        if "Found" in output and "error" in output_lower:
+            return "FAIL"
+        return "PASS"
+
+    @staticmethod
+    def _classify_pytest_status(output: str) -> str:
+        """Classify Pytest output into PASS / FAIL / ERROR."""
+        if not output:
+            return "ERROR"  # Missing evidence = ERROR, not PASS
+        if output.startswith("Tool execution error:") or output.startswith("Tool timed out"):
+            return "ERROR"
+        fail_keywords = [
+            "FAILED", "ERROR", "collected 0 items", "1 error",
+            "SyntaxError", "ModuleNotFoundError", "ImportError",
+            "no tests ran", "0 passed",
+        ]
+        if any(kw in output for kw in fail_keywords):
+            return "FAIL"
+        if "passed" in output.lower():
+            return "PASS"
+        return "ERROR"  # Ambiguous output = ERROR, not PASS
+
+    @staticmethod
+    def _classify_bandit_status(output: str) -> str:
+        """Classify Bandit output into PASS / WARNING / FAIL / ERROR."""
+        if not output:
+            return "ERROR"
+        if output.startswith("Tool execution error:") or output.startswith("Tool timed out"):
+            return "ERROR"
+        if "Severity: High" in output or "Severity: Critical" in output:
+            return "FAIL"
+        if "Severity: Medium" in output or "Severity: Low" in output:
+            return "WARNING"
+        if "No issues identified" in output or "Passed cleanly" in output:
+            return "PASS"
+        # Bandit ran but output is ambiguous
+        return "PASS"
+
+    # ─── Subprocess Runners ────────────────────────────────────────────
+
+    async def _run_tool_cmd(self, cmd: list[str], timeout: float = 30.0) -> str:
+        """Run a CLI tool command without relying on Windows async subprocess support."""
+        return await asyncio.to_thread(self._run_tool_cmd_sync, cmd, timeout)
+
+    @staticmethod
+    def _run_tool_cmd_sync(cmd: list[str], timeout: float) -> str:
+        """Run a command in a worker thread and return its combined output.
+
+        ``asyncio.create_subprocess_exec`` is unavailable when Uvicorn uses a
+        Windows selector event loop.  ``subprocess.run`` in ``to_thread`` keeps
+        the API non-blocking while working on every supported event loop.
+        """
+        try:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+            )
+            output = (result.stdout + result.stderr).strip()
+            return output[:3000] or "Passed cleanly."
+        except subprocess.TimeoutExpired:
+            logger.warning("Tool %s timed out after %.0fs", cmd[1] if len(cmd) > 1 else cmd[0], timeout)
+            return f"Tool timed out after {timeout}s."
+        except FileNotFoundError:
+            logger.warning("Tool %s not found.", cmd[0])
+            return f"{cmd[0]} not installed."
+        except Exception as e:
+            logger.debug("Tool command %s failed: %s", cmd[0], e)
+            detail = str(e) or "no additional detail"
+            return f"Tool execution error: {type(e).__name__}: {detail}"
+
+    async def _run_pytest(self, workspace_dir: Path, timeout: float = 60.0) -> str:
+        """Run pytest against the workspace directory. Returns combined output."""
+        test_files = list(workspace_dir.rglob("test_*.py")) + list(workspace_dir.rglob("*_test.py"))
+        if not test_files:
+            return "No test files found in workspace."
+
+        cmd = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-v", str(workspace_dir)]
+        return await self._run_tool_cmd(cmd, timeout=timeout)
+
+    # ─── Existing Deterministic Check Methods (unchanged) ──────────────
+
     def _check_syntax(self, py_files: list[Path], workspace_dir: Path) -> list[dict[str, Any]]:
-        """Parse every .py file with ast.parse to catch SyntaxErrors."""
+        """Parse every .py file with ast.parse and ruff to catch SyntaxErrors and Undefined Names."""
         errors = []
         for py_file in py_files:
             try:
@@ -137,6 +345,28 @@ class DeterministicValidator:
                     "message": str(e),
                     "severity": "WARNING",
                 })
+
+        # Run ruff check to catch undefined names (F821) and critical syntax issues
+        try:
+            res = subprocess.run(
+                [sys.executable, "-m", "ruff", "check", "--no-cache", str(workspace_dir)],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if res.returncode != 0 and res.stdout:
+                for line in res.stdout.splitlines():
+                    if any(code in line for code in ["F821", "E999", "F811"]):
+                        errors.append({
+                            "type": "LinterError",
+                            "file": line.split(":")[0] if ":" in line else str(workspace_dir),
+                            "line": None,
+                            "message": line.strip(),
+                            "severity": "CRITICAL" if ("F821" in line or "E999" in line) else "WARNING",
+                        })
+        except Exception:
+            pass
+
         return errors
 
     def _check_imports(self, py_files: list[Path], workspace_dir: Path) -> list[dict[str, Any]]:

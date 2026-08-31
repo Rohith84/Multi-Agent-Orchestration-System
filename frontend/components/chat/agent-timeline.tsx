@@ -166,9 +166,29 @@ export function AgentTimeline({ executions, activeAgent }: AgentTimelineProps) {
                     >
                       {getAgentLabel(agent)}
                     </h3>
-                    {agent === "coder" && (state.status === "success" || state.status === "running") && (
+                    {agent === "coder" && state.status === "success" && (
                       <div className="flex items-center gap-1 text-[10px] font-mono text-emerald-400/90 mt-0.5">
-                        <span className="font-bold">✓</span> Quality validation
+                        <span className="font-bold">✓</span> Code generated
+                      </div>
+                    )}
+                    {agent === "coder" && state.status === "failed" && (
+                      <div className="flex items-center gap-1 text-[10px] font-mono text-red-400 mt-0.5">
+                        <span className="font-bold">✗</span> Code generation failed
+                      </div>
+                    )}
+                    {agent === "tester" && state.status === "success" && (
+                      <div className="flex items-center gap-1 text-[10px] font-mono text-emerald-400/90 mt-0.5">
+                        <span className="font-bold">✓</span> Test generation & coverage analysis
+                      </div>
+                    )}
+                    {agent === "reviewer" && state.status === "success" && (
+                      <div className="flex items-center gap-1 text-[10px] font-mono text-emerald-400/90 mt-0.5">
+                        <span className="font-bold">✓</span> Quality Gate Passed
+                      </div>
+                    )}
+                    {agent === "reviewer" && state.status === "failed" && (
+                      <div className="flex items-center gap-1 text-[10px] font-mono text-red-400 mt-0.5">
+                        <span className="font-bold">✗</span> Quality Gate Rejected
                       </div>
                     )}
                   </div>
