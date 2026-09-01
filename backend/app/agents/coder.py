@@ -38,6 +38,7 @@ class CoderAgent:
         bug_report: dict[str, Any] | None = None,
         workspace_service: WorkspaceService | None = None,
         tool_runner: MCPToolRunner | None = None,
+        rag_result: dict[str, Any] | Any | None = None,
     ) -> str:
         logger.info("Executing Coder Agent with model=%s", self.model)
 
@@ -103,6 +104,24 @@ class CoderAgent:
             f"Execution Plan:\n{execution_plan}\n\n"
             f"Research Notes:\n{research_notes}\n\n"
         )
+
+        if rag_result:
+            if isinstance(rag_result, dict):
+                st_val = rag_result.get("status")
+                err_msg = rag_result.get("error")
+            else:
+                st_val = getattr(rag_result, "status", None)
+                err_msg = getattr(rag_result, "error", None)
+
+            st_val_str = st_val.value if hasattr(st_val, "value") else str(st_val)
+            if st_val_str == "RAG_INFRASTRUCTURE_ERROR":
+                prompt += f"[RAG STATUS: RAG_INFRASTRUCTURE_ERROR] Knowledge Base search failed due to an infrastructure error: {err_msg or 'Vector DB error'}. Context is unavailable. Do NOT invent missing requirements or assume failure.\n\n"
+            elif st_val_str == "RAG_EMPTY":
+                prompt += "[RAG STATUS: RAG_EMPTY] Knowledge Base search succeeded, but returned 0 matching documents.\n\n"
+            elif st_val_str == "RAG_SUCCESS":
+                prompt += "[RAG STATUS: RAG_SUCCESS] Knowledge Base search succeeded and retrieved relevant project context.\n\n"
+            else:
+                prompt += f"[RAG STATUS: {st_val_str}]\n\n"
 
         if bug_report:
             prompt += (

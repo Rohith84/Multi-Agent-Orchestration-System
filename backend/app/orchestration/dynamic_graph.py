@@ -3,6 +3,7 @@ Dynamic LangGraph Compiler.
 
 Parses arbitrary graph JSON topologies (nodes, edges, custom agents, conditions) and dynamically constructs executable StateGraph workflows.
 Integrates deterministic contract boundaries (PlanContract, CodeContract, Quality Gate, Evidence-Bound Reviewer) into actual graph execution paths.
+Preserves structured dynamic agent state (PlanContract, Artifacts, CodeContract, Quality Gate, RAGResult, Errors) across node transitions.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ logger = get_logger(__name__)
 class DynamicAgentState(TypedDict, total=False):
     """
     Shared dynamic state passed through custom LangGraph workflows.
+    Preserves structured deterministic evidence across nodes without unneeded text flattening.
     """
 
     session_id: str
@@ -41,9 +43,11 @@ class DynamicAgentState(TypedDict, total=False):
     execution_history: list[str]
     validated_plan: dict[str, Any] | None
     artifacts: list[dict[str, Any]]
+    code_contract: dict[str, Any] | None
     validation_results: dict[str, Any] | None
     quality_gate: str | None
-    errors: list[str]
+    rag_result: dict[str, Any] | None
+    errors: list[dict[str, Any] | str]
 
 
 class DynamicGraphCompiler:
@@ -189,19 +193,29 @@ class DynamicGraphCompiler:
             val_plan = state.get("validated_plan")
             val_results = state.get("validation_results")
             qg_state = state.get("quality_gate")
+            code_contract_data = state.get("code_contract")
+            rag_data = state.get("rag_result")
 
             # Check if an earlier deterministic contract failed
-            plan_failed = any("PlanContract" in err for err in errors)
-            contract_failed = any("CodeContract" in err for err in errors) or qg_state == "FAIL"
+            def _has_err(err_kind: str) -> bool:
+                for e in errors:
+                    if isinstance(e, dict) and e.get("type") == err_kind:
+                        return True
+                    if isinstance(e, str) and err_kind in e:
+                        return True
+                return False
+
+            plan_failed = _has_err("PlanContract") or _has_err("PlanContractError")
+            contract_failed = _has_err("CodeContract") or _has_err("CodeContractError") or qg_state in ("CONTRACT_FAILURE", "FAIL")
 
             if node_type == "planner":
                 agent = PlannerAgent(self.client)
                 planner_res = await agent.execute_contract(req)
                 if not planner_res.is_valid:
                     err_msg = f"PlanContract rejected: {'; '.join(planner_res.errors)}"
-                    errors.append(err_msg)
+                    errors.append({"node": node_id, "type": "PlanContractError", "message": err_msg})
                     val_plan = None
-                    qg_state = "FAIL"
+                    qg_state = "BLOCKED"
                     res = planner_res.formatted_plan
                 else:
                     val_plan = planner_res.contract.model_dump() if planner_res.contract else {}
@@ -213,7 +227,8 @@ class DynamicGraphCompiler:
                 else:
                     plan_text = self._resolve_upstream_output(node_id, "planner", state, nodes_map, edges_list)
                     agent = ResearchAgent(self.client)
-                    res = await agent.execute(req, execution_plan=plan_text)
+                    res, rag_res = await agent.execute_with_result(req, execution_plan=plan_text)
+                    rag_data = rag_res.model_dump()
 
             elif node_type == "coder":
                 if plan_failed:
@@ -227,24 +242,33 @@ class DynamicGraphCompiler:
                         execution_plan=plan_text,
                         research_notes=research_text,
                         workspace_service=ws,
+                        rag_result=rag_data,
                     )
 
-                    # Inspect workspace files and record artifacts
+                    # Inspect workspace files and record clean structured artifact metadata
                     if ws.workspace_dir.exists():
                         for p in ws.workspace_dir.rglob("*.py"):
                             rel_p = str(p.relative_to(ws.workspace_dir))
-                            artifacts.append({"path": rel_p, "content": p.read_text(encoding="utf-8")})
+                            content = p.read_text(encoding="utf-8")
+                            artifacts.append({
+                                "path": rel_p,
+                                "language": "python",
+                                "status": "persisted",
+                                "size_bytes": len(content),
+                                "content": content,
+                            })
 
                     # Immediate CodeContract Validation
                     code_res = CodeContractValidator.validate(ws.workspace_dir)
+                    code_contract_data = code_res.model_dump()
                     if not code_res.is_valid:
                         logger.warning("CodeContract FAILED in graph node %s: %s", node_id, code_res.summary)
-                        qg_state = "FAIL"
+                        qg_state = "CONTRACT_FAILURE"
                         err_msg = f"CodeContract Violation: {code_res.summary}"
-                        errors.append(err_msg)
+                        errors.append({"node": node_id, "type": "CodeContractError", "message": err_msg})
                         val_results = {
-                            "quality_gate": "FAIL",
-                            "code_contract": code_res.model_dump(),
+                            "quality_gate": "CONTRACT_FAILURE",
+                            "code_contract": code_contract_data,
                             "deterministic_checks": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
                             "ruff": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
                             "pytest": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
@@ -267,11 +291,11 @@ class DynamicGraphCompiler:
 
             elif node_type == "quality_gate":
                 if plan_failed or contract_failed:
-                    res = f"Quality Gate Executed: FAIL ({'; '.join(errors)})"
+                    res = f"Quality Gate Executed: {qg_state or 'CONTRACT_FAILURE'}"
                 else:
                     det_val = DeterministicValidator()
                     val_results = await det_val.run_full_quality_gate(ws.workspace_dir)
-                    qg_state = val_results["quality_gate"]
+                    qg_state = self._classify_detailed_gate_state(val_results)
                     res = f"Quality Gate Execution Completed: {qg_state}"
 
             elif node_type == "reviewer":
@@ -284,7 +308,7 @@ class DynamicGraphCompiler:
                 if "coder" in nodes_map.values() and val_results is None:
                     det_val = DeterministicValidator()
                     val_results = await det_val.run_full_quality_gate(ws.workspace_dir)
-                    qg_state = val_results["quality_gate"]
+                    qg_state = self._classify_detailed_gate_state(val_results)
 
                 agent = ReviewerAgent(self.client)
                 res_dict = await agent.execute(
@@ -295,9 +319,11 @@ class DynamicGraphCompiler:
                     research_notes=research_text,
                     validation_results=val_results,
                     session_id=state.get("session_id"),
+                    rag_result=rag_data,
                 )
                 res = res_dict["output"]
-                qg_state = res_dict["quality_gate"]
+                if not qg_state or qg_state == "PASS":
+                    qg_state = res_dict["quality_gate"]
 
             else:
                 # Custom agent or fallback node
@@ -316,9 +342,36 @@ class DynamicGraphCompiler:
                 "execution_history": history,
                 "validated_plan": val_plan,
                 "artifacts": artifacts,
+                "code_contract": code_contract_data,
                 "validation_results": val_results,
                 "quality_gate": qg_state,
+                "rag_result": rag_data,
                 "errors": errors,
             }
 
         return _handler
+
+    @staticmethod
+    def _classify_detailed_gate_state(val_results: dict[str, Any]) -> str:
+        """Preserve detailed authoritative Quality Gate state without unneeded flattening."""
+        gate = val_results.get("quality_gate", "FAIL")
+        if gate != "FAIL":
+            return gate
+
+        # Check for specific failure categories
+        code_cc = val_results.get("code_contract", {})
+        if code_cc and not code_cc.get("is_valid", True):
+            return "CONTRACT_FAILURE"
+
+        pytest_st = val_results.get("pytest", {}).get("status")
+        if pytest_st == "FAIL":
+            return "TEST_FAILURE"
+
+        ruff_st = val_results.get("ruff", {}).get("status")
+        if ruff_st == "FAIL":
+            return "LINT_FAILURE"
+
+        if pytest_st == "ERROR" or ruff_st == "ERROR" or val_results.get("workspace_validation", {}).get("status") == "ERROR":
+            return "INFRASTRUCTURE_FAILURE"
+
+        return "FAIL"

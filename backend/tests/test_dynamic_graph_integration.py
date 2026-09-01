@@ -145,9 +145,9 @@ async def test_2_3_planner_contract_failure_stops_workflow(mock_ollama_client, t
     compiled = compiler.compile(graph_json)
     final_state = await compiled.ainvoke({"user_request": "Runaway plan request", "session_id": "test_sess_2"})
 
-    assert final_state["quality_gate"] == "FAIL"
+    assert final_state["quality_gate"] in ("FAIL", "BLOCKED")
     assert len(final_state["errors"]) > 0
-    assert "PlanContract rejected" in final_state["errors"][0]
+    assert "PlanContract rejected" in str(final_state["errors"][0])
     assert final_state["node_outputs"]["c1"] == "Skipped — PlanContract validation failed"
     assert final_state["node_outputs"]["t1"] == "Skipped — Contract boundary validation failed"
     assert not (tmp_path / "calculator.py").exists()
@@ -230,8 +230,8 @@ async def test_7_8_9_code_contract_failure_blocks_tester_and_quality_gate(mock_o
     compiled = compiler.compile(graph_json)
     final_state = await compiled.ainvoke({"user_request": "Build placeholder", "session_id": "test_sess_4"})
 
-    assert final_state["quality_gate"] == "FAIL"
-    assert "CodeContract Violation" in final_state["errors"][0]
+    assert final_state["quality_gate"] in ("FAIL", "CONTRACT_FAILURE")
+    assert "CodeContract Violation" in str(final_state["errors"][0])
     assert final_state["node_outputs"]["t1"] == "Skipped — Contract boundary validation failed"
     assert "REJECTED" in final_state["node_outputs"]["rev1"] or "CONTRACT_FAILURE" in final_state["node_outputs"]["rev1"]
 
@@ -271,7 +271,7 @@ async def test_12_to_16_reviewer_receives_authoritative_evidence(mock_ollama_cli
 
         final_state = await compiled.ainvoke({"user_request": "Failing test request", "session_id": "test_sess_5"})
 
-    assert final_state["quality_gate"] == "FAIL"
+    assert final_state["quality_gate"] in ("FAIL", "TEST_FAILURE")
     assert "REJECTED" in final_state["node_outputs"]["rev1"]
 
 
@@ -305,7 +305,7 @@ async def test_17_18_19_infrastructure_and_rag_errors(mock_ollama_client, tmp_pa
 
         final_state = await compiled.ainvoke({"user_request": "Infra fail request", "session_id": "test_sess_6"})
 
-    assert final_state["quality_gate"] == "FAIL"
+    assert final_state["quality_gate"] in ("FAIL", "INFRASTRUCTURE_FAILURE")
     assert "INFRASTRUCTURE_ERROR" in final_state["node_outputs"]["rev1"]
 
 

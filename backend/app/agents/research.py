@@ -35,19 +35,18 @@ class ResearchAgent:
         self.model = self.settings.model_research
         self.retriever = KnowledgeRetriever()
 
-    async def execute(
+    async def execute_with_result(
         self,
         user_request: str,
         execution_plan: str,
         tool_runner: MCPToolRunner | None = None,
-    ) -> str:
+    ) -> tuple[str, RAGResult]:
         logger.info("Executing Research Agent with model=%s", self.model)
 
         # 1. Similarity Search with explicit RAGStatus
         rag_res: RAGResult = await self.retriever.retrieve_with_status(user_request, top_k=5)
         retrieved_chunks = rag_res.chunks
         retrieval_time = rag_res.retrieval_time
-
 
         # 2. MCP Tool: Optionally query GitHub for context
         github_context = ""
@@ -137,7 +136,6 @@ class ResearchAgent:
             {"role": "user", "content": prompt}
         ]
 
-        # Call Ollama for research summary
         summary = await self.client.chat(messages, model=self.model, max_tokens=1400)
 
         # 5. Format detailed structured output for the timeline/SSE and Coder Agent
@@ -161,7 +159,6 @@ class ResearchAgent:
                     f"   Snippet: {chunk['content'][:200]}...\n"
                 )
 
-
         if github_context:
             output_parts.append("==================================================")
             output_parts.append("GITHUB CONTEXT")
@@ -173,4 +170,18 @@ class ResearchAgent:
         output_parts.append("==================================================")
         output_parts.append(summary)
 
-        return "\n".join(output_parts)
+        return "\n".join(output_parts), rag_res
+
+    async def execute(
+        self,
+        user_request: str,
+        execution_plan: str,
+        tool_runner: MCPToolRunner | None = None,
+    ) -> str:
+        text_output, _ = await self.execute_with_result(
+            user_request=user_request,
+            execution_plan=execution_plan,
+            tool_runner=tool_runner,
+        )
+        return text_output
+

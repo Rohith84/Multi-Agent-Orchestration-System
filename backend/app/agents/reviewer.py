@@ -48,6 +48,7 @@ class ReviewerAgent:
         tester_analysis: str = "",
         tool_runner: MCPToolRunner | None = None,
         session_id: str | None = None,
+        rag_result: dict[str, Any] | Any | None = None,
     ) -> dict[str, Any]:
         """
         Consumes Quality Gate evidence, evaluates LLM review against it, and returns QualityGate report.
@@ -55,7 +56,9 @@ class ReviewerAgent:
         logger.info("Executing Evidence-Bound Reviewer Agent with model=%s", self.model)
 
         # Normalize structured evidence without mutating raw outputs or inferring status from unstructured text
-        normalized = self._normalize_evidence(validation_results, research_notes, tester_analysis)
+        normalized = self._normalize_evidence(
+            validation_results, research_notes, tester_analysis, rag_result=rag_result
+        )
         authoritative_gate = normalized["quality_gate"]
         final_decision_label = normalized["final_decision_label"]
         evidence_section = normalized["evidence_section"]
@@ -142,9 +145,11 @@ class ReviewerAgent:
         validation_results: dict[str, Any] | None,
         research_notes: str = "",
         tester_analysis: str = "",
+        rag_result: dict[str, Any] | Any | None = None,
     ) -> dict[str, Any]:
         """
         Normalize evidence deterministically for Reviewer context without mutating raw outputs or fabricating statuses.
+        Uses structured rag_result as authoritative over research_notes prose when present.
         """
         if not validation_results:
             gate = "FAIL"
@@ -266,19 +271,37 @@ class ReviewerAgent:
         lines.append(f"Bandit Evidence Detail:\n{bandit_detail[:800]}\n")
         security_findings.append({"tool": "bandit", "status": bandit_st, "output": bandit_raw[:1000]})
 
-        # 3. RAG Status Normalization
-        if "Status: RAG_INFRASTRUCTURE_ERROR" in research_notes or "ERROR: Knowledge Base retrieval failed due to an infrastructure error" in research_notes:
-            rag_st = "RAG_INFRASTRUCTURE_ERROR"
-            lines.append("RAG Status: RAG_INFRASTRUCTURE_ERROR (Knowledge Base retrieval failed due to infrastructure error. Context unavailable. Do NOT claim no documents exist.)")
-        elif "Status: RAG_EMPTY" in research_notes or "returned 0 relevant document chunks" in research_notes:
-            rag_st = "RAG_EMPTY"
-            lines.append("RAG Status: RAG_EMPTY (Knowledge Base accessed successfully, 0 matching documents found.)")
-        elif "Status: RAG_SUCCESS" in research_notes or "RETRIEVED DOCUMENTS & KNOWLEDGE" in research_notes:
-            rag_st = "RAG_SUCCESS"
-            lines.append("RAG Status: RAG_SUCCESS (Relevant Knowledge Base documents retrieved.)")
+        # 3. RAG Status Normalization: Structured rag_result takes absolute precedence over research_notes prose
+        if rag_result is not None:
+            if isinstance(rag_result, dict):
+                st_val = rag_result.get("status")
+                err_msg = rag_result.get("error")
+                chunks = rag_result.get("chunks", [])
+            else:
+                st_val = getattr(rag_result, "status", None)
+                err_msg = getattr(rag_result, "error", None)
+                chunks = getattr(rag_result, "chunks", [])
+
+            st_val_str = st_val.value if hasattr(st_val, "value") else str(st_val)
+
+            if st_val_str == "RAG_INFRASTRUCTURE_ERROR":
+                lines.append(f"RAG Status: RAG_INFRASTRUCTURE_ERROR (Knowledge Base retrieval failed: {err_msg or 'Infrastructure error'}. Context unavailable. Do NOT claim no documents exist.)")
+            elif st_val_str == "RAG_EMPTY":
+                lines.append("RAG Status: RAG_EMPTY (Knowledge Base accessed successfully, 0 matching documents found.)")
+            elif st_val_str == "RAG_SUCCESS":
+                lines.append(f"RAG Status: RAG_SUCCESS (Relevant Knowledge Base documents retrieved: {len(chunks)} chunk(s) available.)")
+            else:
+                lines.append(f"RAG Status: {st_val_str}")
         else:
-            rag_st = "UNAVAILABLE"
-            lines.append("RAG Status: UNAVAILABLE (No explicit RAG status found in research notes)")
+            # Fallback to prose parsing ONLY if rag_result is completely absent
+            if "Status: RAG_INFRASTRUCTURE_ERROR" in research_notes or "ERROR: Knowledge Base retrieval failed due to an infrastructure error" in research_notes:
+                lines.append("RAG Status: RAG_INFRASTRUCTURE_ERROR (Knowledge Base retrieval failed due to infrastructure error. Context unavailable. Do NOT claim no documents exist.)")
+            elif "Status: RAG_EMPTY" in research_notes or "returned 0 relevant document chunks" in research_notes:
+                lines.append("RAG Status: RAG_EMPTY (Knowledge Base accessed successfully, 0 matching documents found.)")
+            elif "Status: RAG_SUCCESS" in research_notes or "RETRIEVED DOCUMENTS & KNOWLEDGE" in research_notes:
+                lines.append("RAG Status: RAG_SUCCESS (Relevant Knowledge Base documents retrieved.)")
+            else:
+                lines.append("RAG Status: UNAVAILABLE (No explicit RAG status found in research notes)")
 
         lines.append("================================")
 
