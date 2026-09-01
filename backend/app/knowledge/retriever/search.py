@@ -9,6 +9,8 @@ from app.core.logging import get_logger
 from app.knowledge.embeddings.generator import OllamaEmbeddingGenerator
 from app.knowledge.vectorstore.chroma import ChromaStore, QueryResultChunk
 
+from app.schemas.rag import RAGResult, RAGStatus
+
 logger = get_logger(__name__)
 
 
@@ -21,6 +23,37 @@ class KnowledgeRetriever:
     def __init__(self) -> None:
         self.embedding_generator = OllamaEmbeddingGenerator()
         self.vector_store = ChromaStore()
+
+    async def retrieve_with_status(self, query: str, top_k: int = 5) -> RAGResult:
+        """
+        Retrieves top K relevant chunks and returns a structured RAGResult
+        with deterministic RAGStatus classification (RAG_SUCCESS, RAG_EMPTY, RAG_INFRASTRUCTURE_ERROR).
+        """
+        start_time = time.time()
+        try:
+            results = await self.retrieve(query, top_k=top_k)
+            elapsed = time.time() - start_time
+            if results:
+                return RAGResult(
+                    status=RAGStatus.RAG_SUCCESS,
+                    chunks=results,
+                    retrieval_time=round(elapsed, 4),
+                )
+            else:
+                return RAGResult(
+                    status=RAGStatus.RAG_EMPTY,
+                    chunks=[],
+                    retrieval_time=round(elapsed, 4),
+                )
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error("RAG retrieval failed with infrastructure error: %s", e)
+            return RAGResult(
+                status=RAGStatus.RAG_INFRASTRUCTURE_ERROR,
+                chunks=[],
+                error=f"{type(e).__name__}: {e}" if str(e) else type(e).__name__,
+                retrieval_time=round(elapsed, 4),
+            )
 
     async def retrieve(self, query: str, top_k: int = 5) -> list[QueryResultChunk]:
         """

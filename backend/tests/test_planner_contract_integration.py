@@ -10,11 +10,20 @@ Validates that:
 
 import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.agents.planner import PlannerAgent, PlannerResult
 from app.ai.ollama_client import OllamaClient
 from app.schemas.contracts import AgentType
+
+
+@pytest.fixture(autouse=True)
+def mock_planning_memory():
+    with patch("app.agents.planner.PlanningMemoryStore") as mock_store:
+        instance = MagicMock()
+        instance.find_similar_plans.return_value = []
+        mock_store.return_value = instance
+        yield mock_store
 
 
 @pytest.fixture

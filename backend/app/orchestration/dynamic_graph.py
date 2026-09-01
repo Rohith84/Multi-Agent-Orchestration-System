@@ -17,6 +17,7 @@ from app.agents.tester import TesterAgent
 from app.agents.reviewer import ReviewerAgent
 from app.mcp.clients.tool_runner import MCPToolRunner
 from app.core.logging import get_logger
+from app.orchestration.graph_validator import GraphContractValidator, GraphContractValidationError
 
 logger = get_logger(__name__)
 
@@ -36,6 +37,7 @@ class DynamicAgentState(TypedDict):
 class DynamicGraphCompiler:
     """
     Compiles custom visual workflow JSON into executable LangGraph StateGraphs.
+    Enforces deterministic GraphContract validation before building the graph.
     """
 
     def __init__(self, ollama_client: OllamaClient | None = None) -> None:
@@ -44,42 +46,48 @@ class DynamicGraphCompiler:
     def compile(self, graph_json: dict[str, Any]) -> Any:
         """
         Build and compile a StateGraph dynamically from nodes and edges JSON.
+        Validates GraphContract before constructing nodes or edges.
         """
-        nodes_list = graph_json.get("nodes", [])
-        edges_list = graph_json.get("edges", [])
+        # 1. Deterministic Graph Contract Validation
+        contract = GraphContractValidator.validate_or_raise(graph_json)
 
-        logger.info("Compiling Dynamic LangGraph with %d nodes and %d edges", len(nodes_list), len(edges_list))
+        nodes_list = contract.nodes
+        edges_list = contract.edges
+
+        logger.info(
+            "Compiling Dynamic LangGraph with %d nodes and %d edges",
+            len(nodes_list),
+            len(edges_list),
+        )
 
         builder = StateGraph(DynamicAgentState)
 
-        # 1. Add Nodes
+        # 2. Add Nodes
         for n in nodes_list:
-            node_id = n.get("id")
-            node_type = n.get("type", "planner").lower()
+            node_id = n.id
+            node_type = n.type.value if hasattr(n.type, "value") else str(n.type).lower()
 
-            node_fn = self._create_node_handler(node_id, node_type, n.get("config", {}))
+            node_fn = self._create_node_handler(node_id, node_type, n.config)
             builder.add_node(node_id, node_fn)
 
-        # 2. Add Edges
-        if nodes_list:
-            # Connect START to first node
-            first_node_id = nodes_list[0]["id"]
-            builder.add_edge(START, first_node_id)
+        # 3. Add Edges
+        # Connect START to first node
+        first_node_id = nodes_list[0].id
+        builder.add_edge(START, first_node_id)
 
-            # Connect consecutive nodes according to edges or linear sequence
-            if edges_list:
-                for edge in edges_list:
-                    src = edge.get("source")
-                    dst = edge.get("target")
-                    if src and dst:
-                        builder.add_edge(src, dst)
-            else:
-                for i in range(len(nodes_list) - 1):
-                    builder.add_edge(nodes_list[i]["id"], nodes_list[i + 1]["id"])
+        # Connect consecutive nodes according to edges or linear sequence
+        if edges_list:
+            for edge in edges_list:
+                src = edge.source
+                dst = edge.target
+                builder.add_edge(src, dst)
+        else:
+            for i in range(len(nodes_list) - 1):
+                builder.add_edge(nodes_list[i].id, nodes_list[i + 1].id)
 
-            # Connect last node to END
-            last_node_id = nodes_list[-1]["id"]
-            builder.add_edge(last_node_id, END)
+        # Connect last node to END
+        last_node_id = nodes_list[-1].id
+        builder.add_edge(last_node_id, END)
 
         return builder.compile()
 

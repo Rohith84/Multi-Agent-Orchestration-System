@@ -53,18 +53,50 @@ class ChromaStore:
                 raise VectorDBUnavailableError(f"ChromaDB persistent client is unavailable: {e}") from e
         return self._client
 
+    def _is_recoverable_metadata_error(self, exc: Exception) -> bool:
+        """
+        Return True ONLY if the exception is specifically identified as a recoverable
+        collection metadata/configuration corruption error, including KeyError('_type').
+        """
+        if isinstance(exc, KeyError):
+            return True
+        err_msg = str(exc).lower()
+        if "_type" in err_msg or "keyerror" in err_msg and "_type" in err_msg:
+            return True
+        return False
+
+    def _recreate_target_collection(self, client: Any) -> None:
+        """
+        Safely recreate ONLY self.collection_name with explicit cosine space metadata.
+        Guarantees that no other collection or persistent directory is deleted.
+        """
+        target = self.collection_name
+        if not target or target != self.collection_name:
+            raise ValueError(f"Target collection mismatch protection: {target} != {self.collection_name}")
+
+        try:
+            client.delete_collection(name=target)
+        except Exception as del_err:
+            logger.debug("Deleting collection '%s' during recovery encountered: %s", target, del_err)
+
+        self._collection = client.create_collection(
+            name=target,
+            metadata={"hnsw:space": "cosine"},
+        )
+
     def _get_collection(self) -> Any:
-        """Lazy retrieval of the vector collection with dimension compatibility check."""
+        """Lazy retrieval of the vector collection with targeted recovery for KeyError('_type')."""
         if self._collection is None:
             client = self._get_client()
             from app.knowledge.embeddings.generator import EmbeddingGenerator
+
             generator = EmbeddingGenerator()
             target_dim = generator.get_dimension()
-            
+
             try:
                 # Try to get the collection first
                 self._collection = client.get_collection(name=self.collection_name)
-                
+
                 # Check for dimension mismatch if collection contains elements
                 if self._collection.count() > 0:
                     peek_data = self._collection.peek(limit=1)
@@ -77,30 +109,46 @@ class ChromaStore:
                                 "but existing collection has %d. Re-creating collection...",
                                 self.collection_name,
                                 target_dim,
-                                existing_dim
+                                existing_dim,
                             )
-                            client.delete_collection(name=self.collection_name)
-                            self._collection = client.create_collection(
-                                name=self.collection_name,
-                                metadata={"hnsw:space": "cosine"}
-                            )
+                            self._recreate_target_collection(client)
             except Exception as e:
                 err_str = str(e).lower()
-                if "does not exist" in err_str or "not found" in err_str or "notfound" in type(e).__name__.lower():
+
+                if self._is_recoverable_metadata_error(e):
+                    logger.warning(
+                        "ChromaDB collection '%s' metadata corruption detected (%s). Attempting targeted recovery...",
+                        self.collection_name,
+                        e,
+                    )
+                    try:
+                        self._recreate_target_collection(client)
+                        logger.info("Successfully recovered target collection '%s' with cosine metadata.", self.collection_name)
+                    except Exception as recovery_err:
+                        logger.exception("Targeted recovery failed for collection '%s': %s", self.collection_name, recovery_err)
+                        raise VectorDBUnavailableError(
+                            f"Targeted recovery failed for collection '{self.collection_name}': {recovery_err}"
+                        ) from recovery_err
+
+                elif "does not exist" in err_str or "not found" in err_str or "notfound" in type(e).__name__.lower():
                     # Collection does not exist yet
                     logger.info("ChromaDB collection '%s' does not exist. Creating...", self.collection_name)
                     try:
                         self._collection = client.create_collection(
                             name=self.collection_name,
-                            metadata={"hnsw:space": "cosine"}
+                            metadata={"hnsw:space": "cosine"},
                         )
                     except Exception as create_err:
                         logger.exception("Failed to create ChromaDB collection: %s", self.collection_name)
                         raise VectorDBUnavailableError(f"Failed to create ChromaDB collection: {create_err}") from create_err
                 else:
-                    logger.exception("Failed to get or create ChromaDB collection: %s", self.collection_name)
+                    # Generic / unrecoverable exception (connection error, permission error, etc.)
+                    # Do NOT recreate collection. Raise VectorDBUnavailableError directly.
+                    logger.exception("Failed to access ChromaDB collection '%s': %s", self.collection_name, e)
                     raise VectorDBUnavailableError(f"Failed to access ChromaDB collection: {e}") from e
+
         return self._collection
+
 
     def add_chunks(
         self,

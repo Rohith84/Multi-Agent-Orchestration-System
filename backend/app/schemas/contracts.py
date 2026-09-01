@@ -142,3 +142,141 @@ class PlanContract(BaseModel):
 
         lines.extend(["", f"REQUIRED_AGENTS: {', '.join(a.value for a in self.required_agents)}"])
         return "\n".join(lines)
+
+
+class GraphNodeType(str, Enum):
+    """Allowed node types in a dynamic workflow graph."""
+    PLANNER = "planner"
+    RESEARCH = "research"
+    CODER = "coder"
+    TESTER = "tester"
+    REVIEWER = "reviewer"
+    CUSTOM = "custom"
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        if isinstance(value, str):
+            val = value.strip().lower()
+            if val in ("planner", "plan"):
+                return cls.PLANNER
+            if val in ("research", "researcher"):
+                return cls.RESEARCH
+            if val in ("coder", "code", "coding", "developer"):
+                return cls.CODER
+            if val in ("tester", "test", "testing", "qa"):
+                return cls.TESTER
+            if val in ("reviewer", "review", "audit"):
+                return cls.REVIEWER
+            if val in ("custom", "agent", "fallback"):
+                return cls.CUSTOM
+        return super()._missing_(value)
+
+
+class GraphNode(BaseModel):
+    """A node in a dynamic workflow graph."""
+    id: str = Field(..., description="Unique non-empty identifier for the node")
+    type: GraphNodeType = Field(default=GraphNodeType.PLANNER, description="Type of the node agent")
+    config: dict[str, Any] = Field(default_factory=dict, description="Optional node-specific configuration")
+
+    @field_validator("id")
+    @classmethod
+    def validate_node_id(cls, v: Any) -> str:
+        if v is None or not str(v).strip():
+            raise ValueError("Node ID cannot be empty or null")
+        return str(v).strip()
+
+
+class GraphEdge(BaseModel):
+    """A directed edge connecting two nodes in a dynamic workflow graph."""
+    source: str = Field(..., description="Source node ID")
+    target: str = Field(..., description="Target node ID")
+
+    @field_validator("source", "target")
+    @classmethod
+    def validate_edge_endpoint(cls, v: Any) -> str:
+        if v is None or not str(v).strip():
+            raise ValueError("Edge source and target must be non-empty strings")
+        return str(v).strip()
+
+
+class GraphContract(BaseModel):
+    """
+    Deterministic contract for a dynamic workflow graph.
+    Enforces non-empty nodes, unique IDs, valid edge endpoints, cycle detection,
+    and reachability invariants before compiling a StateGraph.
+    """
+    nodes: list[GraphNode] = Field(..., description="List of nodes in the graph (1 to 20)")
+    edges: list[GraphEdge] = Field(default_factory=list, description="List of directed edges")
+
+    @model_validator(mode="after")
+    def validate_graph_invariants(self) -> GraphContract:
+        # 1. Reject empty graph
+        if not self.nodes:
+            raise ValueError("GraphContract violation: Graph must contain at least 1 node")
+
+        # 2. Maximum graph size (20 nodes)
+        if len(self.nodes) > 20:
+            raise ValueError(f"GraphContract violation: Maximum 20 nodes allowed in dynamic graph, got {len(self.nodes)}")
+
+        # 3. Unique node IDs
+        seen_node_ids = set()
+        for node in self.nodes:
+            if node.id in seen_node_ids:
+                raise ValueError(f"GraphContract violation: Duplicate node ID '{node.id}' found")
+            seen_node_ids.add(node.id)
+
+        # If edges are provided, validate edge endpoints, uniqueness, self-loops, reachability, and acyclicity
+        if self.edges:
+            seen_edges = set()
+            adj: dict[str, list[str]] = {nid: [] for nid in seen_node_ids}
+            in_degree: dict[str, int] = {nid: 0 for nid in seen_node_ids}
+
+            for edge in self.edges:
+                # 4 & 5. Source and target existence
+                if edge.source not in seen_node_ids:
+                    raise ValueError(f"GraphContract violation: Edge references non-existent source node '{edge.source}'")
+                if edge.target not in seen_node_ids:
+                    raise ValueError(f"GraphContract violation: Edge references non-existent target node '{edge.target}'")
+
+                # Self-loops
+                if edge.source == edge.target:
+                    raise ValueError(f"GraphContract violation: Self-loop detected on node '{edge.source}'")
+
+                # 6. Duplicate edges
+                edge_pair = (edge.source, edge.target)
+                if edge_pair in seen_edges:
+                    raise ValueError(f"GraphContract violation: Duplicate edge from '{edge.source}' to '{edge.target}'")
+                seen_edges.add(edge_pair)
+
+                adj[edge.source].append(edge.target)
+                in_degree[edge.target] += 1
+
+            # 7. Cycle detection using Kahn's algorithm
+            queue = [nid for nid, deg in in_degree.items() if deg == 0]
+            visited_count = 0
+            while queue:
+                curr = queue.pop(0)
+                visited_count += 1
+                for neighbor in adj[curr]:
+                    in_degree[neighbor] -= 1
+                    if in_degree[neighbor] == 0:
+                        queue.append(neighbor)
+
+            if visited_count < len(self.nodes):
+                raise ValueError("GraphContract violation: Directed cycle detected in graph topology")
+
+            # 8. Reachability check from START node (nodes[0].id)
+            start_node_id = self.nodes[0].id
+            reachable = set()
+            dfs_queue = [start_node_id]
+            while dfs_queue:
+                curr = dfs_queue.pop()
+                if curr not in reachable:
+                    reachable.add(curr)
+                    dfs_queue.extend(adj[curr])
+
+            unreachable = seen_node_ids - reachable
+            if unreachable:
+                raise ValueError(f"GraphContract violation: Unreachable node(s) detected: {sorted(list(unreachable))}")
+
+        return self

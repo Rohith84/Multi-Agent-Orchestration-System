@@ -15,6 +15,8 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.knowledge.retriever.search import KnowledgeRetriever
 
+from app.schemas.rag import RAGResult, RAGStatus
+
 if TYPE_CHECKING:
     from app.mcp.clients.tool_runner import MCPToolRunner
 
@@ -41,18 +43,11 @@ class ResearchAgent:
     ) -> str:
         logger.info("Executing Research Agent with model=%s", self.model)
 
-        retrieved_chunks = []
-        retrieval_error = None
-        retrieval_time = 0.0
+        # 1. Similarity Search with explicit RAGStatus
+        rag_res: RAGResult = await self.retriever.retrieve_with_status(user_request, top_k=5)
+        retrieved_chunks = rag_res.chunks
+        retrieval_time = rag_res.retrieval_time
 
-        # 1. Similarity Search
-        try:
-            start_ret = time.time()
-            retrieved_chunks = await self.retriever.retrieve(user_request, top_k=5)
-            retrieval_time = time.time() - start_ret
-        except Exception as e:
-            logger.error("Retrieval failed during Research Agent execution: %s", e)
-            retrieval_error = str(e)
 
         # 2. MCP Tool: Optionally query GitHub for context
         github_context = ""
@@ -76,17 +71,21 @@ class ResearchAgent:
         # 3. Build Context String for LLM Prompt
         context_str = ""
         citation_sources = []
-        if retrieved_chunks:
+        if rag_res.status == RAGStatus.RAG_SUCCESS:
             context_blocks = []
             for idx, chunk in enumerate(retrieved_chunks):
                 citation = f"Source {idx + 1}: {chunk['filename']} (similarity: {chunk['score']})"
                 citation_sources.append(citation)
-                context_blocks.append(
-                    f"--- {citation} ---\n{chunk['content']}"
-                )
+                context_blocks.append(f"--- {citation} ---\n{chunk['content']}")
             context_str = "\n\n".join(context_blocks)
+        elif rag_res.status == RAGStatus.RAG_EMPTY:
+            context_str = "Knowledge Base was accessed successfully, but no relevant documents were found for this query."
         else:
-            context_str = "No relevant context found in Knowledge Base."
+            # RAG_INFRASTRUCTURE_ERROR
+            context_str = (
+                f"Knowledge Base retrieval failed due to an infrastructure error: {rag_res.error or 'Vector DB error'}. "
+                "Retrieved context is unavailable."
+            )
 
         # 4. Generate LLM Prompt
         system_prompt = (
@@ -107,7 +106,7 @@ class ResearchAgent:
             "- Do NOT generate implementation code.\n"
             "- Do NOT perform unrelated research beyond the scope of the task.\n"
             "- Clearly distinguish known information (from context) from assumptions or general knowledge.\n"
-            "- If the Knowledge Base does not contain relevant information, state that clearly rather than fabricating context.\n"
+            "- If the Knowledge Base does not contain relevant information or vector search failed, state that clearly rather than fabricating context.\n"
             "- Only recommend dependencies or technologies when they are directly relevant to the task.\n\n"
             "## Output Format\n"
             "Return research findings containing:\n"
@@ -144,13 +143,14 @@ class ResearchAgent:
         # 5. Format detailed structured output for the timeline/SSE and Coder Agent
         output_parts = []
         output_parts.append("==================================================")
-        output_parts.append("RETRIEVED DOCUMENTS & KNOWLEDGE")
+        output_parts.append(f"RETRIEVED DOCUMENTS & KNOWLEDGE (Status: {rag_res.status})")
         output_parts.append("==================================================")
-        
-        if retrieval_error:
-            output_parts.append(f"ERROR: Retrieval failed: {retrieval_error}")
-        elif not retrieved_chunks:
-            output_parts.append("No relevant documents found in the Knowledge Base.")
+
+        if rag_res.status == RAGStatus.RAG_INFRASTRUCTURE_ERROR:
+            output_parts.append(f"ERROR: Knowledge Base retrieval failed due to an infrastructure error: {rag_res.error}")
+            output_parts.append("Note: Vector database access failed. No document fabrication performed.")
+        elif rag_res.status == RAGStatus.RAG_EMPTY:
+            output_parts.append("Knowledge Base was accessed successfully, but returned 0 relevant document chunks.")
         else:
             output_parts.append(f"Retrieval Time: {round(retrieval_time, 4)} seconds\n")
             for idx, chunk in enumerate(retrieved_chunks):
@@ -160,6 +160,7 @@ class ResearchAgent:
                     f"   Chunk Index: {chunk['chunk_index']}\n"
                     f"   Snippet: {chunk['content'][:200]}...\n"
                 )
+
 
         if github_context:
             output_parts.append("==================================================")

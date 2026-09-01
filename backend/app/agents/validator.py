@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 from app.core.logging import get_logger
+from app.orchestration.code_contract import CodeContractValidator
+from app.schemas.tool_result import ToolResult, ToolStatus, execute_tool
 
 logger = get_logger(__name__)
 
@@ -172,23 +174,81 @@ class DeterministicValidator:
                 for e in det_result["errors"]
             )
 
+        # 1.5. Deterministic CodeContract Validation — block Ruff & Pytest on contract failure
+        code_contract_res = CodeContractValidator.validate(workspace_dir, planned_files)
+        if not code_contract_res.is_valid:
+            logger.warning(
+                "CodeContract FAILED for workspace %s: %s — Quality Gate execution BLOCKED",
+                workspace_dir,
+                code_contract_res.summary,
+            )
+            failure_output = f"{det_output}\nCodeContract Violation: {code_contract_res.summary}"
+            if code_contract_res.errors:
+                failure_output += "\n" + "\n".join(
+                    f"[{e.rule}] {e.file}:{e.line or 1}: {e.message}" for e in code_contract_res.errors
+                )
+
+            return {
+                "deterministic_checks": {"status": "FAIL", "output": failure_output[:2000]},
+                "code_contract": code_contract_res.model_dump(),
+                "ruff": {"status": "ERROR", "output": "Skipped — CodeContract validation failed"},
+                "pytest": {"status": "ERROR", "output": "Skipped — CodeContract validation failed"},
+                "bandit": {"status": "ERROR", "output": "Skipped — CodeContract validation failed"},
+                "quality_gate": "FAIL",
+                "test_passed": False,
+            }
+
         # 2. Run Ruff linter (full check)
         ruff_raw = await self._run_tool_cmd(
             [sys.executable, "-m", "ruff", "check", "--no-cache", str(workspace_dir)],
             timeout=30.0,
+            cwd=workspace_dir,
+            tool_name="ruff",
         )
-        ruff_status = self._classify_ruff_status(ruff_raw)
+        if isinstance(ruff_raw, ToolResult):
+            if ruff_raw.status == ToolStatus.PASS:
+                ruff_status = "PASS"
+            elif ruff_raw.status in (ToolStatus.LINT_FAILURE, ToolStatus.TEST_FAILURE, ToolStatus.CONFIG_ERROR):
+                ruff_status = "FAIL"
+            else:
+                ruff_status = "ERROR"
+            ruff_output = ruff_raw.stdout or ruff_raw.stderr or ruff_raw.execution_error or ""
+        else:
+            ruff_status = self._classify_ruff_status(ruff_raw)
+            ruff_output = ruff_raw
 
         # 3. Run Pytest
         pytest_raw = await self._run_pytest(workspace_dir)
-        pytest_status = self._classify_pytest_status(pytest_raw)
+        if isinstance(pytest_raw, ToolResult):
+            if pytest_raw.status == ToolStatus.PASS:
+                pytest_status = "PASS"
+            elif pytest_raw.status in (ToolStatus.TEST_FAILURE, ToolStatus.LINT_FAILURE, ToolStatus.CONFIG_ERROR):
+                pytest_status = "FAIL"
+            else:
+                pytest_status = "ERROR"
+            pytest_output = pytest_raw.stdout or pytest_raw.stderr or pytest_raw.execution_error or ""
+        else:
+            pytest_status = self._classify_pytest_status(pytest_raw)
+            pytest_output = pytest_raw
 
         # 4. Run Bandit (-s B101 to skip assert checks in test files)
         bandit_raw = await self._run_tool_cmd(
             [sys.executable, "-m", "bandit", "-r", "-s", "B101", str(workspace_dir)],
             timeout=30.0,
+            cwd=workspace_dir,
+            tool_name="bandit",
         )
-        bandit_status = self._classify_bandit_status(bandit_raw)
+        if isinstance(bandit_raw, ToolResult):
+            if bandit_raw.status == ToolStatus.PASS:
+                bandit_status = "PASS"
+            elif bandit_raw.status in (ToolStatus.LINT_FAILURE, ToolStatus.TEST_FAILURE, ToolStatus.CONFIG_ERROR):
+                bandit_status = "FAIL"
+            else:
+                bandit_status = "ERROR"
+            bandit_output = bandit_raw.stdout or bandit_raw.stderr or bandit_raw.execution_error or ""
+        else:
+            bandit_status = self._classify_bandit_status(bandit_raw)
+            bandit_output = bandit_raw
 
         # 5. Compute authoritative Quality Gate decision
         has_failure = (
@@ -212,9 +272,21 @@ class DeterministicValidator:
 
         return {
             "deterministic_checks": {"status": det_status, "output": det_output[:2000]},
-            "ruff": {"status": ruff_status, "output": ruff_raw[:2000]},
-            "pytest": {"status": pytest_status, "output": pytest_raw[:2000]},
-            "bandit": {"status": bandit_status, "output": bandit_raw[:2000]},
+            "ruff": {
+                "status": ruff_status,
+                "output": ruff_output[:2000],
+                "result": ruff_raw.model_dump() if isinstance(ruff_raw, ToolResult) else None,
+            },
+            "pytest": {
+                "status": pytest_status,
+                "output": pytest_output[:2000],
+                "result": pytest_raw.model_dump() if isinstance(pytest_raw, ToolResult) else None,
+            },
+            "bandit": {
+                "status": bandit_status,
+                "output": bandit_output[:2000],
+                "result": bandit_raw.model_dump() if isinstance(bandit_raw, ToolResult) else None,
+            },
             "quality_gate": quality_gate,
             "test_passed": quality_gate != "FAIL",
         }
@@ -276,49 +348,39 @@ class DeterministicValidator:
 
     # ─── Subprocess Runners ────────────────────────────────────────────
 
-    async def _run_tool_cmd(self, cmd: list[str], timeout: float = 30.0) -> str:
-        """Run a CLI tool command without relying on Windows async subprocess support."""
-        return await asyncio.to_thread(self._run_tool_cmd_sync, cmd, timeout)
+    async def _run_tool_cmd(
+        self,
+        cmd: list[str],
+        timeout: float = 30.0,
+        cwd: Path | str | None = None,
+        tool_name: str | None = None,
+    ) -> ToolResult | str:
+        """Run a CLI tool command returning a structured ToolResult."""
+        return await asyncio.to_thread(self._run_tool_cmd_sync, cmd, timeout, cwd, tool_name)
 
     @staticmethod
-    def _run_tool_cmd_sync(cmd: list[str], timeout: float) -> str:
-        """Run a command in a worker thread and return its combined output.
+    def _run_tool_cmd_sync(
+        cmd: list[str],
+        timeout: float,
+        cwd: Path | str | None = None,
+        tool_name: str | None = None,
+    ) -> ToolResult:
+        """Run a command in a worker thread and return a structured ToolResult.
 
         ``asyncio.create_subprocess_exec`` is unavailable when Uvicorn uses a
-        Windows selector event loop.  ``subprocess.run`` in ``to_thread`` keeps
+        Windows selector event loop.  ``execute_tool`` in ``to_thread`` keeps
         the API non-blocking while working on every supported event loop.
         """
-        try:
-            result = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-            )
-            output = (result.stdout + result.stderr).strip()
-            return output[:3000] or "Passed cleanly."
-        except subprocess.TimeoutExpired:
-            logger.warning("Tool %s timed out after %.0fs", cmd[1] if len(cmd) > 1 else cmd[0], timeout)
-            return f"Tool timed out after {timeout}s."
-        except FileNotFoundError:
-            logger.warning("Tool %s not found.", cmd[0])
-            return f"{cmd[0]} not installed."
-        except Exception as e:
-            logger.debug("Tool command %s failed: %s", cmd[0], e)
-            detail = str(e) or "no additional detail"
-            return f"Tool execution error: {type(e).__name__}: {detail}"
+        return execute_tool(cmd, cwd=cwd, timeout=timeout, tool_name=tool_name)
 
-    async def _run_pytest(self, workspace_dir: Path, timeout: float = 60.0) -> str:
-        """Run pytest against the workspace directory. Returns combined output."""
+    async def _run_pytest(self, workspace_dir: Path, timeout: float = 60.0) -> ToolResult | str:
+        """Run pytest against the workspace directory returning a structured ToolResult."""
         test_files = list(workspace_dir.rglob("test_*.py")) + list(workspace_dir.rglob("*_test.py"))
         if not test_files:
             return "No test files found in workspace."
 
         cmd = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-v", str(workspace_dir)]
-        return await self._run_tool_cmd(cmd, timeout=timeout)
+        return await self._run_tool_cmd(cmd, timeout=timeout, cwd=workspace_dir, tool_name="pytest")
 
     # ─── Existing Deterministic Check Methods (unchanged) ──────────────
 
