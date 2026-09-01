@@ -151,18 +151,46 @@ class DeterministicValidator:
             "test_passed": bool,
         }
         """
+        # 1. Workspace validation
         if not workspace_dir.exists():
             error_msg = f"Workspace directory does not exist: {workspace_dir}"
             return {
-                "deterministic_checks": {"status": "ERROR", "output": error_msg},
-                "ruff": {"status": "ERROR", "output": "Skipped — workspace missing"},
-                "pytest": {"status": "ERROR", "output": "Skipped — workspace missing"},
-                "bandit": {"status": "ERROR", "output": "Skipped — workspace missing"},
+                "workspace_validation": {"status": "ERROR", "output": error_msg},
+                "code_contract": {"status": "NOT_EXECUTED", "output": "Skipped — workspace missing"},
+                "deterministic_checks": {"status": "NOT_EXECUTED", "output": "Skipped — workspace missing"},
+                "ruff": {"status": "NOT_EXECUTED", "output": "Skipped — workspace missing"},
+                "pytest": {"status": "NOT_EXECUTED", "output": "Skipped — workspace missing"},
+                "bandit": {"status": "NOT_EXECUTED", "output": "Skipped — workspace missing"},
                 "quality_gate": "FAIL",
                 "test_passed": False,
             }
 
-        # 1. Run existing deterministic checks (syntax, imports, deps, manifest)
+        # 2. CodeContract Validation — block downstream execution on contract failure
+        code_contract_res = CodeContractValidator.validate(workspace_dir, planned_files)
+        if not code_contract_res.is_valid:
+            logger.warning(
+                "CodeContract FAILED for workspace %s: %s — Quality Gate execution BLOCKED",
+                workspace_dir,
+                code_contract_res.summary,
+            )
+            failure_output = f"CodeContract Violation: {code_contract_res.summary}"
+            if code_contract_res.errors:
+                failure_output += "\n" + "\n".join(
+                    f"[{e.rule}] {e.file}:{e.line or 1}: {e.message}" for e in code_contract_res.errors
+                )
+
+            return {
+                "workspace_validation": {"status": "PASS", "output": "Workspace exists and is accessible."},
+                "code_contract": code_contract_res.model_dump(),
+                "deterministic_checks": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract validation failed"},
+                "ruff": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract validation failed"},
+                "pytest": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract validation failed"},
+                "bandit": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract validation failed"},
+                "quality_gate": "FAIL",
+                "test_passed": False,
+            }
+
+        # 3. Deterministic syntax, import, dependency, and manifest validation
         det_result = await self.validate(workspace_dir, planned_files)
         if det_result["passed"]:
             det_status = "PASS"
@@ -173,32 +201,18 @@ class DeterministicValidator:
                 f"[{e['severity']}] {e['type']} in {e['file']}: {e['message']}"
                 for e in det_result["errors"]
             )
-
-        # 1.5. Deterministic CodeContract Validation — block Ruff & Pytest on contract failure
-        code_contract_res = CodeContractValidator.validate(workspace_dir, planned_files)
-        if not code_contract_res.is_valid:
-            logger.warning(
-                "CodeContract FAILED for workspace %s: %s — Quality Gate execution BLOCKED",
-                workspace_dir,
-                code_contract_res.summary,
-            )
-            failure_output = f"{det_output}\nCodeContract Violation: {code_contract_res.summary}"
-            if code_contract_res.errors:
-                failure_output += "\n" + "\n".join(
-                    f"[{e.rule}] {e.file}:{e.line or 1}: {e.message}" for e in code_contract_res.errors
-                )
-
             return {
-                "deterministic_checks": {"status": "FAIL", "output": failure_output[:2000]},
+                "workspace_validation": {"status": "PASS", "output": "Workspace exists and is accessible."},
                 "code_contract": code_contract_res.model_dump(),
-                "ruff": {"status": "ERROR", "output": "Skipped — CodeContract validation failed"},
-                "pytest": {"status": "ERROR", "output": "Skipped — CodeContract validation failed"},
-                "bandit": {"status": "ERROR", "output": "Skipped — CodeContract validation failed"},
+                "deterministic_checks": {"status": "FAIL", "output": det_output[:2000]},
+                "ruff": {"status": "NOT_EXECUTED", "output": "Skipped — Deterministic syntax/import validation failed"},
+                "pytest": {"status": "NOT_EXECUTED", "output": "Skipped — Deterministic syntax/import validation failed"},
+                "bandit": {"status": "NOT_EXECUTED", "output": "Skipped — Deterministic syntax/import validation failed"},
                 "quality_gate": "FAIL",
                 "test_passed": False,
             }
 
-        # 2. Run Ruff linter (full check)
+        # 4. Run Ruff linter (full check)
         ruff_raw = await self._run_tool_cmd(
             [sys.executable, "-m", "ruff", "check", "--no-cache", str(workspace_dir)],
             timeout=30.0,
@@ -213,11 +227,13 @@ class DeterministicValidator:
             else:
                 ruff_status = "ERROR"
             ruff_output = ruff_raw.stdout or ruff_raw.stderr or ruff_raw.execution_error or ""
+            ruff_res_dump = ruff_raw.model_dump()
         else:
             ruff_status = self._classify_ruff_status(ruff_raw)
             ruff_output = ruff_raw
+            ruff_res_dump = None
 
-        # 3. Run Pytest
+        # 5. Run Pytest
         pytest_raw = await self._run_pytest(workspace_dir)
         if isinstance(pytest_raw, ToolResult):
             if pytest_raw.status == ToolStatus.PASS:
@@ -227,11 +243,13 @@ class DeterministicValidator:
             else:
                 pytest_status = "ERROR"
             pytest_output = pytest_raw.stdout or pytest_raw.stderr or pytest_raw.execution_error or ""
+            pytest_res_dump = pytest_raw.model_dump()
         else:
             pytest_status = self._classify_pytest_status(pytest_raw)
             pytest_output = pytest_raw
+            pytest_res_dump = None
 
-        # 4. Run Bandit (-s B101 to skip assert checks in test files)
+        # 6. Run Bandit (-s B101 to skip assert checks in test files)
         bandit_raw = await self._run_tool_cmd(
             [sys.executable, "-m", "bandit", "-r", "-s", "B101", str(workspace_dir)],
             timeout=30.0,
@@ -246,11 +264,13 @@ class DeterministicValidator:
             else:
                 bandit_status = "ERROR"
             bandit_output = bandit_raw.stdout or bandit_raw.stderr or bandit_raw.execution_error or ""
+            bandit_res_dump = bandit_raw.model_dump()
         else:
             bandit_status = self._classify_bandit_status(bandit_raw)
             bandit_output = bandit_raw
+            bandit_res_dump = None
 
-        # 5. Compute authoritative Quality Gate decision
+        # 7. Compute Authoritative Quality Gate Decision
         has_failure = (
             det_status == "FAIL"
             or ruff_status == "FAIL"
@@ -270,26 +290,20 @@ class DeterministicValidator:
         else:
             quality_gate = "PASS"
 
+        test_passed = pytest_status in ("PASS", "WARNING")
+
         return {
-            "deterministic_checks": {"status": det_status, "output": det_output[:2000]},
-            "ruff": {
-                "status": ruff_status,
-                "output": ruff_output[:2000],
-                "result": ruff_raw.model_dump() if isinstance(ruff_raw, ToolResult) else None,
-            },
-            "pytest": {
-                "status": pytest_status,
-                "output": pytest_output[:2000],
-                "result": pytest_raw.model_dump() if isinstance(pytest_raw, ToolResult) else None,
-            },
-            "bandit": {
-                "status": bandit_status,
-                "output": bandit_output[:2000],
-                "result": bandit_raw.model_dump() if isinstance(bandit_raw, ToolResult) else None,
-            },
+            "workspace_validation": {"status": "PASS", "output": "Workspace exists and is accessible."},
+            "code_contract": code_contract_res.model_dump(),
+            "deterministic_checks": {"status": det_status, "output": det_output},
+            "ruff": {"status": ruff_status, "output": ruff_output, "result": ruff_res_dump},
+            "pytest": {"status": pytest_status, "output": pytest_output, "result": pytest_res_dump},
+            "bandit": {"status": bandit_status, "output": bandit_output, "result": bandit_res_dump},
             "quality_gate": quality_gate,
-            "test_passed": quality_gate != "FAIL",
+            "test_passed": test_passed,
         }
+
+
 
     # ─── Tool Classification Helpers ───────────────────────────────────
 

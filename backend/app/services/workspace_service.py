@@ -30,10 +30,18 @@ class WorkspaceService:
     Manages an isolated project workspace under sandbox_workspace/<session_id>/.
     """
 
-    def __init__(self, db: AsyncSession, session_id: uuid.UUID | None = None) -> None:
+    def __init__(
+        self,
+        db: AsyncSession | None = None,
+        session_id: uuid.UUID | str | None = None,
+        workspace_dir: Path | None = None,
+    ) -> None:
         self.db = db
-        self.session_id = session_id or uuid.uuid4()
-        self.workspace_dir = SANDBOX_DIR / str(self.session_id)
+        self.session_id = str(session_id or uuid.uuid4())
+        if workspace_dir:
+            self.workspace_dir = Path(workspace_dir).resolve()
+        else:
+            self.workspace_dir = SANDBOX_DIR / self.session_id
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
     def _resolve_safe_path(self, relative_path: str) -> Path:
@@ -45,14 +53,33 @@ class WorkspaceService:
         return target_path
 
     async def write_file(self, relative_path: str, content: str, language: str = "python") -> WorkspaceFileSchema:
-        """Write file to disk and record version in DB."""
+        """Write file to disk and record version in DB if session available."""
         target_path = self._resolve_safe_path(relative_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
         target_path.write_text(content, encoding="utf-8")
         logger.info("Workspace file written: %s (%d bytes)", relative_path, len(content))
 
-        # Check existing version
+        if not self.db:
+            logger.info("Isolated workspace file written to disk (no DB session): %s", relative_path)
+            sess_uuid = (
+                uuid.UUID(self.session_id)
+                if isinstance(self.session_id, str) and len(self.session_id) == 36
+                else uuid.uuid4()
+            )
+            return WorkspaceFileSchema(
+                id=uuid.uuid4(),
+                session_id=sess_uuid,
+                file_path=relative_path,
+                content=content,
+                language=language,
+                version=1,
+                status="isolated_test_write",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+
+        # Check existing version in DB
         result = await self.db.execute(
             select(WorkspaceFile).where(
                 WorkspaceFile.session_id == self.session_id,

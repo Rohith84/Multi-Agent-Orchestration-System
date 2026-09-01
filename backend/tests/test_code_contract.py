@@ -365,9 +365,9 @@ async def test_23_quality_gate_blocked_on_code_contract_failure(tmp_path: Path):
 
         assert res["quality_gate"] == "FAIL"
         assert res["test_passed"] is False
-        assert res["ruff"]["status"] == "ERROR"
+        assert res["ruff"]["status"] == "NOT_EXECUTED"
         assert "Skipped — CodeContract validation failed" in res["ruff"]["output"]
-        assert res["pytest"]["status"] == "ERROR"
+        assert res["pytest"]["status"] == "NOT_EXECUTED"
         assert "Skipped — CodeContract validation failed" in res["pytest"]["output"]
 
         # CRITICAL ASSERTION: Ruff and Pytest execution methods were NOT invoked

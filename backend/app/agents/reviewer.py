@@ -1,8 +1,14 @@
 """
 Reviewer Agent.
-Performs qualitative architectural code review and enforces Quality Gate decisions.
-Does NOT run Ruff/Bandit/Pytest — those are executed by the Internal Quality Gate.
-Consumes pre-computed validation_results and provides qualitative assessment.
+Performs evidence-bound qualitative architectural code review and enforces Quality Gate decisions.
+Does NOT run linters or tests — consumes pre-computed validation_results from the Quality Gate.
+Strictly evidence-bound:
+- Prevents hallucination of lint/test/code errors on INFRASTRUCTURE_ERROR
+- Preserves exact raw stdout/stderr/execution_error
+- Differentiates OBSERVED FACTS from INFERENCES
+- Reports CONTRACT_FAILURE with exact rules
+- Reports RAG_SUCCESS, RAG_EMPTY, and RAG_INFRASTRUCTURE_ERROR accurately
+- Marks missing structured evidence as UNAVAILABLE
 """
 
 from __future__ import annotations
@@ -22,8 +28,8 @@ logger = get_logger(__name__)
 
 class ReviewerAgent:
     """
-    Reviewer Agent performs qualitative architectural review and enforces Quality Gate decisions.
-    Does NOT run linters or tests — consumes pre-computed validation_results from the Quality Gate.
+    Reviewer Agent performs evidence-bound qualitative architectural review and enforces Quality Gate decisions.
+    Consumes pre-computed validation_results from the Quality Gate without inventing unsupported defects.
     """
 
     def __init__(self, client: OllamaClient) -> None:
@@ -45,130 +51,243 @@ class ReviewerAgent:
     ) -> dict[str, Any]:
         """
         Consumes Quality Gate evidence, evaluates LLM review against it, and returns QualityGate report.
-
-        Args:
-            validation_results: Pre-computed structured validation results from the Quality Gate.
-                Contains ruff, pytest, bandit, deterministic_checks statuses and outputs.
-            tester_analysis: Qualitative test coverage analysis from the Tester Agent.
         """
-        logger.info("Executing Reviewer Agent with model=%s", self.model)
+        logger.info("Executing Evidence-Bound Reviewer Agent with model=%s", self.model)
 
-        # Extract pre-computed statuses from Quality Gate results (fail-closed defaults)
-        if validation_results:
-            ruff_status = validation_results.get("ruff", {}).get("status", "ERROR")
-            pytest_status = validation_results.get("pytest", {}).get("status", "ERROR")
-            bandit_status = validation_results.get("bandit", {}).get("status", "ERROR")
-            det_status = validation_results.get("deterministic_checks", {}).get("status", "ERROR")
-            authoritative_gate = validation_results.get("quality_gate", "FAIL")
+        # Normalize structured evidence without mutating raw outputs or inferring status from unstructured text
+        normalized = self._normalize_evidence(validation_results, research_notes, tester_analysis)
+        authoritative_gate = normalized["quality_gate"]
+        final_decision_label = normalized["final_decision_label"]
+        evidence_section = normalized["evidence_section"]
 
-            ruff_output = validation_results.get("ruff", {}).get("output", "No output")
-            pytest_output = validation_results.get("pytest", {}).get("output", "No output")
-            bandit_output = validation_results.get("bandit", {}).get("output", "No output")
-        else:
-            # No validation_results available → fail closed, not open
-            ruff_status = "ERROR"
-            pytest_status = "ERROR"
-            bandit_status = "ERROR"
-            det_status = "ERROR"
-            authoritative_gate = "FAIL"
-            ruff_output = "No validation results available (missing evidence)."
-            pytest_output = "No validation results available (missing evidence)."
-            bandit_output = "No validation results available (missing evidence)."
-
-        # Compute authoritative decision label
-        deterministic_failed = authoritative_gate == "FAIL"
-        if deterministic_failed:
-            final_decision_label = "REJECTED"
-        elif authoritative_gate == "PASS_WITH_WARNINGS":
-            final_decision_label = "APPROVED_WITH_WARNINGS"
-        else:
-            final_decision_label = "APPROVED"
-
-        # Build Prominent Structured Evidence Section for LLM
-        evidence_section = (
-            "==================================================\n"
-            "VALIDATION RESULTS (DETERMINISTIC AUTHORITATIVE EVIDENCE)\n"
-            "==================================================\n"
-            f"Deterministic Checks Status: {det_status}\n"
-            f"Ruff Linter Status: {ruff_status}\n"
-            f"Pytest Execution Status: {pytest_status}\n"
-            f"Bandit Security Status: {bandit_status}\n"
-            f"Authoritative Quality Gate: {authoritative_gate} ({final_decision_label})\n\n"
-            "[DETERMINISTIC FAILURE & LOG DETAILS]\n"
-            f"Ruff Output:\n{ruff_output[:1000]}\n\n"
-            f"Pytest Output:\n{pytest_output[:1000]}\n\n"
-            f"Bandit Output:\n{bandit_output[:1000]}\n"
-            "=================================================="
-        )
-
-        # Include Tester's coverage analysis if available
         tester_section = ""
         if tester_analysis:
-            tester_section = (
-                "\n\n--- TESTER AGENT COVERAGE ANALYSIS ---\n"
-                f"{tester_analysis[:1500]}\n"
-            )
+            tester_section = f"\n\n--- TESTER AGENT COVERAGE ANALYSIS ---\n{tester_analysis[:1500]}\n"
 
         code_section = self._extract_files_summary(generated_code)
 
-        # A failed deterministic gate already contains the exact actionable
-        # evidence. Do not ask an LLM to infer a qualitative review from a
-        # failed or unavailable tool run: it can hallucinate issues and often
-        # repeats the report, obscuring the real failure.
-        if authoritative_gate == "FAIL":
+        # If Quality Gate explicitly failed, build actionable failure review based strictly on evidence
+        deterministic_failed = authoritative_gate == "FAIL"
+        if deterministic_failed:
             llm_review = (
                 "### Review Summary\n"
                 "The implementation was not approved because the deterministic quality gate failed. "
-                "The findings below are limited to the recorded tool evidence.\n\n"
-                f"### Correctness\nFAIL\n\n"
-                f"### Quality Score\n40/100\n\n"
+                "The findings below are strictly bound to the recorded tool and contract evidence.\n\n"
+                "### Correctness\nFAIL\n\n"
+                "### Quality Score\n40/100\n\n"
                 f"### Final Status\n{final_decision_label}\n"
             )
         else:
+            system_prompt = (
+                "You are the Evidence-Bound Reviewer Agent in a multi-agent orchestration system.\n\n"
+                "## Role & Responsibilities\n"
+                "You perform qualitative architectural code review strictly grounded in deterministic tool evidence.\n\n"
+                "## Critical Evidence Rules (MANDATORY)\n"
+                "1. Deterministic tool results and Quality Gate decisions are authoritative for execution status.\n"
+                "2. INFRASTRUCTURE_ERROR (e.g. FileNotFoundError, TimeoutExpired, tool process execution error) is an infrastructure failure, NOT a code defect, lint error, or test failure. If a tool has status INFRASTRUCTURE_ERROR, state clearly that tool execution failed due to an infrastructure error and code quality cannot be evaluated from this evidence. NEVER claim linter found errors or tests failed when tool execution failed.\n"
+                "3. Distinguish OBSERVED FACTS (actual output in tool evidence) from INFERENCES (speculation). Never present inferences as confirmed facts.\n"
+                "4. For CodeContract CONTRACT_FAILURE, reference only the actual recorded contract violations (missing manifest files, syntax errors, empty files, placeholders, pass stubs). Do not invent additional violations.\n"
+                "5. For RAG evidence:\n"
+                "   - RAG_INFRASTRUCTURE_ERROR means Knowledge Base retrieval failed. Never state 'no documents were found'.\n"
+                "   - RAG_EMPTY means retrieval succeeded but returned 0 documents.\n"
+                "   - RAG_SUCCESS means retrieved documents are available with citations.\n"
+                "6. If evidence is marked UNAVAILABLE, explicitly state that evidence is unavailable rather than assuming PASS or FAIL.\n"
+                "7. Do not claim broader guarantees than the evidence supports (e.g. do not claim code is 'Production-ready' unless checks explicitly verify it).\n\n"
+                "## Output Format\n"
+                "Provide one concise structured review containing:\n"
+                "- **Review Summary**: Concise evidence-bound summary.\n"
+                "- **Correctness**: Evidence-bound assessment.\n"
+                "- **Architecture**: Component structure and design patterns.\n"
+                "- **Security Findings**: Evidence-bound security assessment.\n"
+                "- **Code Quality**: Readability, maintainability, and standards.\n"
+                "- **Test Result Assessment**: Based strictly on test output.\n"
+                "- **Quality Score**: Score out of 100.\n"
+                "- **Final Status**: APPROVED / APPROVED_WITH_WARNINGS / REJECTED.\n"
+            )
+
+            prompt = (
+                f"User Request:\n{user_request[:800]}\n\n"
+                f"Execution Plan:\n{execution_plan[:1500]}\n\n"
+                f"Research Notes:\n{research_notes[:800]}\n\n"
+                f"{evidence_section}\n\n{tester_section}\n\n{code_section}"
+            )
+
             llm_review = await self._request_qualitative_review(
-                system_prompt=(
-                    "You are the Reviewer Agent in a multi-agent orchestration system.\n\n"
-                    "Use only the supplied implementation and deterministic evidence. Do not invent "
-                    "security vulnerabilities, files, tests, or requirements that are not present.\n\n"
-                    "Provide one concise structured review containing Review Summary, Correctness, "
-                    "Architecture, Security Findings, Code Quality, Test Result Assessment, "
-                    "Quality Score out of 100, and Final Status."
-                ),
-                prompt=(
-                    f"User Request:\n{user_request[:800]}\n\n"
-                    f"Execution Plan:\n{execution_plan[:1500]}\n\n"
-                    f"Research Notes:\n{research_notes[:800]}\n\n"
-                    f"{evidence_section}\n\n{tester_section}\n\n{code_section}"
-                ),
+                system_prompt=system_prompt,
+                prompt=prompt,
                 authoritative_gate=authoritative_gate,
             )
 
-        # Hard Python Enforcement: LLM text cannot override deterministic failure
         quality_gate = authoritative_gate
         raw_score = self._parse_quality_score(llm_review, quality_gate)
-        if deterministic_failed:
-            overall_score = min(raw_score, 40.0)  # Hard cap at 40.0 / 100 on validation failure
-        else:
-            overall_score = raw_score
+        overall_score = min(raw_score, 40.0) if deterministic_failed else raw_score
 
         text_output = (
             f"{llm_review}\n\n"
-            f"--- DETERMINISTIC QUALITY GATE EVIDENCE ---\n"
+            f"--- DETERMINISTIC EVIDENCE SUMMARY ---\n"
             f"Final Quality Gate: {quality_gate} ({final_decision_label})\n"
-            f"Deterministic Checks: {det_status}\n"
-            f"Ruff Status: {ruff_status}\n"
-            f"Pytest Status: {pytest_status}\n"
-            f"Bandit Status: {bandit_status}\n\n"
-            f"Ruff Output:\n{ruff_output[:600]}\n\n"
-            f"Test Output:\n{pytest_output[:600]}\n"
+            f"{evidence_section[:1500]}\n"
         )
 
         return {
             "output": text_output,
             "quality_gate": quality_gate,
             "overall_score": overall_score,
-            "lint_findings": [{"tool": "ruff", "status": ruff_status, "output": ruff_output[:1000]}],
-            "security_findings": [{"tool": "bandit", "status": bandit_status, "output": bandit_output[:1000]}],
+            "lint_findings": normalized.get("lint_findings", []),
+            "security_findings": normalized.get("security_findings", []),
+        }
+
+    def _normalize_evidence(
+        self,
+        validation_results: dict[str, Any] | None,
+        research_notes: str = "",
+        tester_analysis: str = "",
+    ) -> dict[str, Any]:
+        """
+        Normalize evidence deterministically for Reviewer context without mutating raw outputs or fabricating statuses.
+        """
+        if not validation_results:
+            gate = "FAIL"
+            decision_label = "REJECTED"
+            evidence_text = (
+                "==================================================\n"
+                "VALIDATION RESULTS (MISSING EVIDENCE)\n"
+                "==================================================\n"
+                "Quality Gate Status: FAIL (Missing Evidence)\n"
+                "CodeContract Status: UNAVAILABLE\n"
+                "Ruff Linter Status: UNAVAILABLE\n"
+                "Pytest Execution Status: UNAVAILABLE\n"
+                "Bandit Security Status: UNAVAILABLE\n"
+                "Note: No validation results were provided.\n"
+                "=================================================="
+            )
+            return {
+                "quality_gate": gate,
+                "final_decision_label": decision_label,
+                "evidence_section": evidence_text,
+                "lint_findings": [],
+                "security_findings": [],
+            }
+
+        gate = validation_results.get("quality_gate", "FAIL")
+        if gate == "FAIL":
+            decision_label = "REJECTED"
+        elif gate == "PASS_WITH_WARNINGS":
+            decision_label = "APPROVED_WITH_WARNINGS"
+        else:
+            decision_label = "APPROVED"
+
+        lines = [
+            "==================================================",
+            "VALIDATION RESULTS (DETERMINISTIC AUTHORITATIVE EVIDENCE)",
+            "==================================================",
+            f"Authoritative Quality Gate: {gate} ({decision_label})",
+        ]
+
+        # 1. CodeContract Evidence
+        code_contract = validation_results.get("code_contract")
+        if isinstance(code_contract, dict):
+            cc_status = code_contract.get("status", "UNAVAILABLE")
+            cc_summary = code_contract.get("summary", "")
+            lines.append(f"CodeContract Status: {cc_status}")
+            if cc_status == "CONTRACT_FAILURE":
+                lines.append(f"CodeContract Violations: {cc_summary}")
+                errors = code_contract.get("errors", [])
+                for err in errors:
+                    lines.append(f"  - [{err.get('rule')}] {err.get('file')}:{err.get('line') or 1}: {err.get('message')}")
+        else:
+            lines.append("CodeContract Status: UNAVAILABLE")
+
+        # 2. Tool Evidence Helper
+        lint_findings = []
+        security_findings = []
+
+        def process_tool(tool_key: str, display_name: str) -> tuple[str, str, str]:
+            tool_entry = validation_results.get(tool_key)
+            if not isinstance(tool_entry, dict):
+                return "UNAVAILABLE", "No evidence provided for this tool.", ""
+
+            # Check if structured result dict exists
+            res_dict = tool_entry.get("result")
+            status = tool_entry.get("status")
+            output = tool_entry.get("output", "")
+
+            if isinstance(res_dict, dict):
+                structured_status = res_dict.get("status")
+                exit_code = res_dict.get("exit_code")
+                stdout = res_dict.get("stdout", "")
+                stderr = res_dict.get("stderr", "")
+                exec_err = res_dict.get("execution_error")
+
+                if structured_status == "INFRASTRUCTURE_ERROR":
+                    status_str = "INFRASTRUCTURE_ERROR"
+                    detail = (
+                        f"[INFRASTRUCTURE ERROR] Tool execution failed due to an infrastructure error ({exec_err or 'process error'}). "
+                        "Code quality or defects cannot be evaluated from this tool."
+                    )
+                elif structured_status == "LINT_FAILURE":
+                    status_str = "LINT_FAILURE"
+                    detail = f"[LINT FAILURE] Exit Code {exit_code}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+                elif structured_status == "TEST_FAILURE":
+                    status_str = "TEST_FAILURE"
+                    detail = f"[TEST FAILURE] Exit Code {exit_code}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+                elif structured_status == "CONFIG_ERROR":
+                    status_str = "CONFIG_ERROR"
+                    detail = f"[CONFIG ERROR] Exit Code {exit_code}\nstderr:\n{stderr}\nstdout:\n{stdout}"
+                elif structured_status == "PASS":
+                    status_str = "PASS"
+                    detail = f"[PASS] Exit Code 0\nstdout:\n{stdout}"
+                else:
+                    status_str = str(structured_status)
+                    detail = f"stdout:\n{stdout}\nstderr:\n{stderr}"
+                return status_str, detail, stdout or stderr or output
+            else:
+                # Unstructured / String fallback: do NOT infer INFRASTRUCTURE_ERROR from raw string unless status field is set
+                if status is not None:
+                    status_str = str(status)
+                else:
+                    status_str = "UNAVAILABLE"
+                return status_str, output, output
+
+        # Ruff
+        ruff_st, ruff_detail, ruff_raw = process_tool("ruff", "Ruff")
+        lines.append(f"Ruff Linter Status: {ruff_st}")
+        lines.append(f"Ruff Evidence Detail:\n{ruff_detail[:800]}\n")
+        lint_findings.append({"tool": "ruff", "status": ruff_st, "output": ruff_raw[:1000]})
+
+        # Pytest
+        pytest_st, pytest_detail, pytest_raw = process_tool("pytest", "Pytest")
+        lines.append(f"Pytest Execution Status: {pytest_st}")
+        lines.append(f"Pytest Evidence Detail:\n{pytest_detail[:800]}\n")
+
+        # Bandit
+        bandit_st, bandit_detail, bandit_raw = process_tool("bandit", "Bandit")
+        lines.append(f"Bandit Security Status: {bandit_st}")
+        lines.append(f"Bandit Evidence Detail:\n{bandit_detail[:800]}\n")
+        security_findings.append({"tool": "bandit", "status": bandit_st, "output": bandit_raw[:1000]})
+
+        # 3. RAG Status Normalization
+        if "Status: RAG_INFRASTRUCTURE_ERROR" in research_notes or "ERROR: Knowledge Base retrieval failed due to an infrastructure error" in research_notes:
+            rag_st = "RAG_INFRASTRUCTURE_ERROR"
+            lines.append("RAG Status: RAG_INFRASTRUCTURE_ERROR (Knowledge Base retrieval failed due to infrastructure error. Context unavailable. Do NOT claim no documents exist.)")
+        elif "Status: RAG_EMPTY" in research_notes or "returned 0 relevant document chunks" in research_notes:
+            rag_st = "RAG_EMPTY"
+            lines.append("RAG Status: RAG_EMPTY (Knowledge Base accessed successfully, 0 matching documents found.)")
+        elif "Status: RAG_SUCCESS" in research_notes or "RETRIEVED DOCUMENTS & KNOWLEDGE" in research_notes:
+            rag_st = "RAG_SUCCESS"
+            lines.append("RAG Status: RAG_SUCCESS (Relevant Knowledge Base documents retrieved.)")
+        else:
+            rag_st = "UNAVAILABLE"
+            lines.append("RAG Status: UNAVAILABLE (No explicit RAG status found in research notes)")
+
+        lines.append("================================")
+
+        return {
+            "quality_gate": gate,
+            "final_decision_label": decision_label,
+            "evidence_section": "\n".join(lines),
+            "lint_findings": lint_findings,
+            "security_findings": security_findings,
         }
 
     async def _request_qualitative_review(
@@ -191,7 +310,6 @@ class ReviewerAgent:
         matches = re.findall(pattern, generated_code, re.DOTALL)
 
         if not matches:
-            # Fallback: no annotated blocks, show raw truncated
             return f"Generated Code (raw, no annotated file blocks found):\n{generated_code[:3000]}\n"
 
         sections: list[str] = []
@@ -218,7 +336,6 @@ class ReviewerAgent:
         Parse the Quality Score from the LLM's review text.
         Falls back to gate-based defaults if no score is found.
         """
-        # Try patterns like "Quality Score: 75/100", "Score: 80 / 100", "**Quality Score**: 65/100"
         patterns = [
             r"[Qq]uality\s*[Ss]core[:\s]*\**\s*(\d{1,3})\s*/\s*100",
             r"[Ss]core[:\s]*\**\s*(\d{1,3})\s*/\s*100",
@@ -232,7 +349,6 @@ class ReviewerAgent:
                 if 0 <= score <= 100:
                     return score
 
-        # Fallback defaults based on quality gate
         if quality_gate == "FAIL":
             return 45.0
         elif quality_gate == "PASS_WITH_WARNINGS":
