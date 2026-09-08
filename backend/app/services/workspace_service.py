@@ -57,8 +57,12 @@ class WorkspaceService:
         target_path = self._resolve_safe_path(relative_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
-        target_path.write_text(content, encoding="utf-8")
-        logger.info("Workspace file written: %s (%d bytes)", relative_path, len(content))
+        try:
+            target_path.write_text(content, encoding="utf-8")
+            logger.info("Workspace file written: %s (%d bytes)", relative_path, len(content))
+        except Exception as e:
+            logger.error("Workspace file write failed for %s: %s", relative_path, e)
+            raise IOError(f"Workspace file write failed for '{relative_path}': {e}") from e
 
         if not self.db:
             logger.info("Isolated workspace file written to disk (no DB session): %s", relative_path)

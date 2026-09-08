@@ -22,6 +22,10 @@ from app.agents.validator import DeterministicValidator
 from app.orchestration.code_contract import CodeContractValidator
 from app.orchestration.graph_validator import GraphContractValidator, GraphContractValidationError
 from app.services.workspace_service import WorkspaceService
+import asyncio
+import time
+from app.schemas.execution_error import ExecutionError, ExecutionErrorType, WorkflowStatus
+from app.schemas.execution_trace import ExecutionEvent, ExecutionEventType, ExecutionSummary
 from app.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -47,6 +51,11 @@ class DynamicAgentState(TypedDict, total=False):
     validation_results: dict[str, Any] | None
     quality_gate: str | None
     rag_result: dict[str, Any] | None
+    reasoning_metadata: dict[str, Any] | None
+    workflow_status: str | None
+    execution_errors: list[dict[str, Any]]
+    execution_trace: list[dict[str, Any]]
+    execution_summary: dict[str, Any] | None
     errors: list[dict[str, Any] | str]
 
 
@@ -208,133 +217,322 @@ class DynamicGraphCompiler:
             plan_failed = _has_err("PlanContract") or _has_err("PlanContractError")
             contract_failed = _has_err("CodeContract") or _has_err("CodeContractError") or qg_state in ("CONTRACT_FAILURE", "FAIL")
 
-            if node_type == "planner":
-                agent = PlannerAgent(self.client)
-                planner_res = await agent.execute_contract(req)
-                if not planner_res.is_valid:
-                    err_msg = f"PlanContract rejected: {'; '.join(planner_res.errors)}"
-                    errors.append({"node": node_id, "type": "PlanContractError", "message": err_msg})
-                    val_plan = None
-                    qg_state = "BLOCKED"
-                    res = planner_res.formatted_plan
-                else:
-                    val_plan = planner_res.contract.model_dump() if planner_res.contract else {}
-                    res = planner_res.formatted_plan
+            sess_id = state.get("session_id") or "default_session"
+            trace = list(state.get("execution_trace") or [])
+            exec_errors = list(state.get("execution_errors", []))
+            wf_status = state.get("workflow_status") or WorkflowStatus.RUNNING.value
+            reasoning_dict = dict(state.get("reasoning_metadata") or {})
 
-            elif node_type == "research":
-                if plan_failed:
-                    res = "Skipped — PlanContract validation failed"
-                else:
-                    plan_text = self._resolve_upstream_output(node_id, "planner", state, nodes_map, edges_list)
-                    agent = ResearchAgent(self.client)
-                    res, rag_res = await agent.execute_with_result(req, execution_plan=plan_text)
-                    rag_data = rag_res.model_dump()
-
-            elif node_type == "coder":
-                if plan_failed:
-                    res = "Skipped — PlanContract validation failed"
-                else:
-                    plan_text = self._resolve_upstream_output(node_id, "planner", state, nodes_map, edges_list)
-                    research_text = self._resolve_upstream_output(node_id, "research", state, nodes_map, edges_list)
-                    agent = CoderAgent(self.client)
-                    res = await agent.execute(
-                        req,
-                        execution_plan=plan_text,
-                        research_notes=research_text,
-                        workspace_service=ws,
-                        rag_result=rag_data,
-                    )
-
-                    # Inspect workspace files and record clean structured artifact metadata
-                    if ws.workspace_dir.exists():
-                        for p in ws.workspace_dir.rglob("*.py"):
-                            rel_p = str(p.relative_to(ws.workspace_dir))
-                            content = p.read_text(encoding="utf-8")
-                            artifacts.append({
-                                "path": rel_p,
-                                "language": "python",
-                                "status": "persisted",
-                                "size_bytes": len(content),
-                                "content": content,
-                            })
-
-                    # Immediate CodeContract Validation
-                    code_res = CodeContractValidator.validate(ws.workspace_dir)
-                    code_contract_data = code_res.model_dump()
-                    if not code_res.is_valid:
-                        logger.warning("CodeContract FAILED in graph node %s: %s", node_id, code_res.summary)
-                        qg_state = "CONTRACT_FAILURE"
-                        err_msg = f"CodeContract Violation: {code_res.summary}"
-                        errors.append({"node": node_id, "type": "CodeContractError", "message": err_msg})
-                        val_results = {
-                            "quality_gate": "CONTRACT_FAILURE",
-                            "code_contract": code_contract_data,
-                            "deterministic_checks": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
-                            "ruff": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
-                            "pytest": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
-                            "bandit": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
-                        }
-
-            elif node_type == "tester":
-                if plan_failed or contract_failed:
-                    res = "Skipped — Contract boundary validation failed"
-                else:
-                    coder_code = self._resolve_upstream_output(node_id, "coder", state, nodes_map, edges_list)
-                    plan_text = self._resolve_upstream_output(node_id, "planner", state, nodes_map, edges_list)
-                    agent = TesterAgent(self.client)
-                    res_dict = await agent.execute(
-                        generated_code=coder_code,
-                        execution_plan=plan_text,
-                        workspace_service=ws,
-                    )
-                    res = res_dict["output"]
-
-            elif node_type == "quality_gate":
-                if plan_failed or contract_failed:
-                    res = f"Quality Gate Executed: {qg_state or 'CONTRACT_FAILURE'}"
-                else:
-                    det_val = DeterministicValidator()
-                    val_results = await det_val.run_full_quality_gate(ws.workspace_dir)
-                    qg_state = self._classify_detailed_gate_state(val_results)
-                    res = f"Quality Gate Execution Completed: {qg_state}"
-
-            elif node_type == "reviewer":
-                plan_text = self._resolve_upstream_output(node_id, "planner", state, nodes_map, edges_list)
-                coder_code = self._resolve_upstream_output(node_id, "coder", state, nodes_map, edges_list)
-                tester_text = self._resolve_upstream_output(node_id, "tester", state, nodes_map, edges_list)
-                research_text = self._resolve_upstream_output(node_id, "research", state, nodes_map, edges_list)
-
-                # For coding workflows, if Quality Gate was not run as a distinct node, run it automatically
-                if "coder" in nodes_map.values() and val_results is None:
-                    det_val = DeterministicValidator()
-                    val_results = await det_val.run_full_quality_gate(ws.workspace_dir)
-                    qg_state = self._classify_detailed_gate_state(val_results)
-
-                agent = ReviewerAgent(self.client)
-                res_dict = await agent.execute(
-                    user_request=req,
-                    execution_plan=plan_text,
-                    generated_code=coder_code,
-                    test_results=tester_text,
-                    research_notes=research_text,
-                    validation_results=val_results,
-                    session_id=state.get("session_id"),
-                    rag_result=rag_data,
+            def _add_evt(evt_type: ExecutionEventType | str, status: str = "SUCCESS", duration_ms: float | None = None, attempt_num: int | None = None, msg: str | None = None, evidence: dict | None = None):
+                evt = ExecutionEvent(
+                    session_id=sess_id,
+                    event_type=evt_type if isinstance(evt_type, ExecutionEventType) else ExecutionEventType(evt_type),
+                    node_id=node_id,
+                    agent_type=node_type,
+                    status=status,
+                    duration_ms=duration_ms,
+                    attempt=attempt_num,
+                    message=msg,
+                    evidence=evidence,
                 )
-                res = res_dict["output"]
-                if not qg_state or qg_state == "PASS":
-                    qg_state = res_dict["quality_gate"]
+                trace.append(evt.model_dump())
 
-            else:
-                # Custom agent or fallback node
-                system_prompt = config.get("system_prompt", f"You are node {node_id}.")
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": req},
-                ]
-                res = await self.client.chat(messages)
+            if not trace:
+                evt_wf_start = ExecutionEvent(
+                    session_id=sess_id,
+                    event_type=ExecutionEventType.WORKFLOW_STARTED,
+                    status="SUCCESS",
+                    message="Workflow execution started",
+                )
+                trace.append(evt_wf_start.model_dump())
 
-            outputs[node_id] = res
+            attempt = 0
+            max_attempts = 2
+
+            while attempt < max_attempts:
+                attempt += 1
+                start_t = time.time()
+                if attempt > 1:
+                    _add_evt(ExecutionEventType.NODE_RETRIED, status="RETRYING", attempt_num=attempt, msg=f"Retrying node {node_id}")
+
+                _add_evt(ExecutionEventType.NODE_STARTED, status="RUNNING", attempt_num=attempt)
+
+                try:
+                    if node_type == "planner":
+                        agent = PlannerAgent(self.client)
+                        planner_res = await agent.execute_contract(req)
+                        if planner_res.reasoning_metadata:
+                            reasoning_dict[node_id] = planner_res.reasoning_metadata.model_dump()
+                        if not planner_res.is_valid:
+                            err_msg = f"PlanContract rejected: {'; '.join(planner_res.errors)}"
+                            errors.append({"node": node_id, "type": "PlanContractError", "message": err_msg})
+                            val_plan = None
+                            qg_state = "BLOCKED"
+                            wf_status = WorkflowStatus.BLOCKED.value
+                            res = planner_res.formatted_plan
+                            _add_evt(ExecutionEventType.CONTRACT_FAILED, status="CONTRACT_FAILURE", evidence={"contract": "PlanContract", "errors": planner_res.errors})
+                        else:
+                            val_plan = planner_res.contract.model_dump() if planner_res.contract else {}
+                            res = planner_res.formatted_plan
+                            _add_evt(ExecutionEventType.CONTRACT_VALIDATED, status="PASS", evidence={"contract": "PlanContract", "subtask_count": len(planner_res.contract.subtasks) if planner_res.contract else 0})
+
+                    elif node_type == "research":
+                        if plan_failed:
+                            res = "Skipped — PlanContract validation failed"
+                            wf_status = WorkflowStatus.BLOCKED.value
+                        else:
+                            plan_text = self._resolve_upstream_output(node_id, "planner", state, nodes_map, edges_list)
+                            agent = ResearchAgent(self.client)
+                            res, rag_res = await agent.execute_with_result(req, execution_plan=plan_text)
+                            rag_data = rag_res.model_dump()
+                            rag_stat_str = rag_res.status.value if hasattr(rag_res.status, "value") else str(rag_res.status)
+                            _add_evt(ExecutionEventType.RAG_COMPLETED, status=rag_stat_str, evidence={"status": rag_stat_str, "chunks_count": len(rag_res.chunks), "error": rag_res.error})
+
+                    elif node_type == "coder":
+                        if plan_failed:
+                            res = "Skipped — PlanContract validation failed"
+                            wf_status = WorkflowStatus.BLOCKED.value
+                        else:
+                            plan_text = self._resolve_upstream_output(node_id, "planner", state, nodes_map, edges_list)
+                            research_text = self._resolve_upstream_output(node_id, "research", state, nodes_map, edges_list)
+                            agent = CoderAgent(self.client)
+                            res = await agent.execute(
+                                req,
+                                execution_plan=plan_text,
+                                research_notes=research_text,
+                                workspace_service=ws,
+                                rag_result=rag_data,
+                            )
+
+                            if ws.workspace_dir.exists():
+                                for p in ws.workspace_dir.rglob("*.py"):
+                                    rel_p = str(p.relative_to(ws.workspace_dir))
+                                    content = p.read_text(encoding="utf-8")
+                                    artifacts.append({
+                                        "path": rel_p,
+                                        "language": "python",
+                                        "status": "persisted",
+                                        "size_bytes": len(content),
+                                        "content": content,
+                                    })
+
+                            code_res = CodeContractValidator.validate(ws.workspace_dir)
+                            code_contract_data = code_res.model_dump()
+                            if not code_res.is_valid:
+                                logger.warning("CodeContract FAILED in graph node %s: %s", node_id, code_res.summary)
+                                qg_state = "CONTRACT_FAILURE"
+                                wf_status = WorkflowStatus.BLOCKED.value
+                                err_msg = f"CodeContract Violation: {code_res.summary}"
+                                errors.append({"node": node_id, "type": "CodeContractError", "message": err_msg})
+                                val_results = {
+                                    "quality_gate": "CONTRACT_FAILURE",
+                                    "code_contract": code_contract_data,
+                                    "deterministic_checks": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
+                                    "ruff": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
+                                    "pytest": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
+                                    "bandit": {"status": "NOT_EXECUTED", "output": "Skipped — CodeContract failed"},
+                                }
+                                _add_evt(ExecutionEventType.CONTRACT_FAILED, status="CONTRACT_FAILURE", evidence={"contract": "CodeContract", "summary": code_res.summary})
+                            else:
+                                _add_evt(ExecutionEventType.CONTRACT_VALIDATED, status="PASS", evidence={"contract": "CodeContract", "summary": code_res.summary})
+
+                    elif node_type == "tester":
+                        if plan_failed or contract_failed:
+                            res = "Skipped — Contract boundary validation failed"
+                            wf_status = WorkflowStatus.BLOCKED.value
+                        else:
+                            coder_code = self._resolve_upstream_output(node_id, "coder", state, nodes_map, edges_list)
+                            plan_text = self._resolve_upstream_output(node_id, "planner", state, nodes_map, edges_list)
+                            agent = TesterAgent(self.client)
+                            res_dict = await agent.execute(
+                                generated_code=coder_code,
+                                execution_plan=plan_text,
+                                workspace_service=ws,
+                            )
+                            res = res_dict["output"]
+
+                    elif node_type == "quality_gate":
+                        if plan_failed or contract_failed:
+                            res = f"Quality Gate Executed: {qg_state or 'CONTRACT_FAILURE'}"
+                            wf_status = WorkflowStatus.BLOCKED.value
+                        else:
+                            det_val = DeterministicValidator()
+                            _add_evt(ExecutionEventType.TOOL_STARTED, status="RUNNING", msg="Running Quality Gate deterministic tools")
+                            val_results = await det_val.run_full_quality_gate(ws.workspace_dir)
+                            qg_state = self._classify_detailed_gate_state(val_results)
+                            res = f"Quality Gate Execution Completed: {qg_state}"
+                            if qg_state in ("FAIL", "CONTRACT_FAILURE", "INFRASTRUCTURE_FAILURE"):
+                                wf_status = WorkflowStatus.BLOCKED.value
+
+                            for t_name in ("ruff", "pytest", "bandit"):
+                                t_res = val_results.get(t_name)
+                                if isinstance(t_res, dict):
+                                    t_stat = t_res.get("status", "NOT_EXECUTED")
+                                    _add_evt(
+                                        ExecutionEventType.TOOL_COMPLETED if t_stat in ("PASS", "FAIL") else ExecutionEventType.TOOL_FAILED,
+                                        status=t_stat,
+                                        evidence={"tool": t_name, "status": t_stat, "output_snippet": str(t_res.get("output", ""))[:200]},
+                                    )
+
+                            _add_evt(ExecutionEventType.QUALITY_GATE_COMPLETED, status=qg_state, evidence={"quality_gate": qg_state, "val_results": val_results})
+
+                    elif node_type == "reviewer":
+                        plan_text = self._resolve_upstream_output(node_id, "planner", state, nodes_map, edges_list)
+                        coder_code = self._resolve_upstream_output(node_id, "coder", state, nodes_map, edges_list)
+                        tester_text = self._resolve_upstream_output(node_id, "tester", state, nodes_map, edges_list)
+                        research_text = self._resolve_upstream_output(node_id, "research", state, nodes_map, edges_list)
+
+                        if "coder" in nodes_map.values() and val_results is None:
+                            det_val = DeterministicValidator()
+                            val_results = await det_val.run_full_quality_gate(ws.workspace_dir)
+                            qg_state = self._classify_detailed_gate_state(val_results)
+                            _add_evt(ExecutionEventType.QUALITY_GATE_COMPLETED, status=qg_state, evidence={"quality_gate": qg_state, "val_results": val_results})
+
+                        agent = ReviewerAgent(self.client)
+                        res_dict = await agent.execute(
+                            user_request=req,
+                            execution_plan=plan_text,
+                            generated_code=coder_code,
+                            test_results=tester_text,
+                            research_notes=research_text,
+                            validation_results=val_results,
+                            session_id=state.get("session_id"),
+                            rag_result=rag_data,
+                        )
+                        res = res_dict["output"]
+                        if not qg_state or qg_state == "PASS":
+                            qg_state = res_dict["quality_gate"]
+
+                        wf_status = WorkflowStatus.COMPLETED.value if qg_state == "PASS" else WorkflowStatus.BLOCKED.value
+                        _add_evt(ExecutionEventType.REVIEW_COMPLETED, status=res_dict.get("quality_gate", "NOT_APPROVED"), evidence={"quality_gate": qg_state, "reviewer_output": res[:300]})
+
+                    else:
+                        system_prompt = config.get("system_prompt", f"You are node {node_id}.")
+                        messages = [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": req},
+                        ]
+                        res = await self.client.chat(messages)
+
+                    outputs[node_id] = res
+                    node_dur = (time.time() - start_t) * 1000
+                    _add_evt(ExecutionEventType.NODE_COMPLETED, status="SUCCESS", duration_ms=node_dur, attempt_num=attempt)
+                    break
+
+                except asyncio.CancelledError:
+                    node_dur = (time.time() - start_t) * 1000
+                    logger.warning("Graph node %s cancelled during attempt %d", node_id, attempt)
+                    exec_err = ExecutionError(
+                        node=node_id,
+                        agent=node_type,
+                        error_type=ExecutionErrorType.CANCELLATION,
+                        message="Workflow task cancelled during execution",
+                        recoverable=False,
+                        attempt=attempt,
+                    )
+                    exec_errors.append(exec_err.model_dump())
+                    errors.append(exec_err.model_dump())
+                    wf_status = WorkflowStatus.CANCELLED.value
+                    if not qg_state or qg_state == "PASS":
+                        qg_state = "BLOCKED"
+                    res = "Task Cancelled"
+                    outputs[node_id] = res
+                    _add_evt(ExecutionEventType.NODE_FAILED, status="CANCELLED", duration_ms=node_dur, attempt_num=attempt, msg="Task cancelled")
+                    _add_evt(ExecutionEventType.WORKFLOW_CANCELLED, status="CANCELLED")
+                    break
+
+                except (asyncio.TimeoutError, TimeoutError) as te:
+                    node_dur = (time.time() - start_t) * 1000
+                    logger.error("Graph node %s timed out during attempt %d: %s", node_id, attempt, te)
+                    if attempt < max_attempts:
+                        logger.info("Retrying node %s (attempt %d/%d)", node_id, attempt + 1, max_attempts)
+                        continue
+                    exec_err = ExecutionError(
+                        node=node_id,
+                        agent=node_type,
+                        error_type=ExecutionErrorType.AGENT_TIMEOUT,
+                        message=f"Agent execution timed out: {te}",
+                        recoverable=False,
+                        attempt=attempt,
+                    )
+                    exec_errors.append(exec_err.model_dump())
+                    errors.append(exec_err.model_dump())
+                    wf_status = WorkflowStatus.FAILED.value
+                    qg_state = "INFRASTRUCTURE_FAILURE"
+                    res = f"Execution Error: Node {node_id} timed out"
+                    outputs[node_id] = res
+                    _add_evt(ExecutionEventType.NODE_FAILED, status="FAILED", duration_ms=node_dur, attempt_num=attempt, msg=str(te))
+                    _add_evt(ExecutionEventType.WORKFLOW_FAILED, status="FAILED", msg="Agent timeout")
+                    break
+
+                except (IOError, OSError) as os_err:
+                    node_dur = (time.time() - start_t) * 1000
+                    logger.error("Workspace/IO failure in node %s attempt %d: %s", node_id, attempt, os_err)
+                    exec_err = ExecutionError(
+                        node=node_id,
+                        agent=node_type,
+                        error_type=ExecutionErrorType.WORKSPACE_FAILURE,
+                        message=str(os_err),
+                        recoverable=False,
+                        attempt=attempt,
+                    )
+                    exec_errors.append(exec_err.model_dump())
+                    errors.append(exec_err.model_dump())
+                    wf_status = WorkflowStatus.FAILED.value
+                    qg_state = "INFRASTRUCTURE_FAILURE"
+                    res = f"Workspace Failure: {os_err}"
+                    outputs[node_id] = res
+                    _add_evt(ExecutionEventType.NODE_FAILED, status="FAILED", duration_ms=node_dur, attempt_num=attempt, msg=str(os_err))
+                    _add_evt(ExecutionEventType.WORKFLOW_FAILED, status="FAILED", msg="Workspace failure")
+                    break
+
+                except Exception as exc:
+                    node_dur = (time.time() - start_t) * 1000
+                    logger.error("Unhandled exception in graph node %s attempt %d: %s", node_id, attempt, exc)
+                    is_transient = "timeout" in str(exc).lower() or "connection" in str(exc).lower()
+                    if is_transient and attempt < max_attempts:
+                        logger.info("Retrying node %s on transient error (attempt %d/%d)", node_id, attempt + 1, max_attempts)
+                        continue
+                    exec_err = ExecutionError(
+                        node=node_id,
+                        agent=node_type,
+                        error_type=ExecutionErrorType.AGENT_FAILURE,
+                        message=str(exc),
+                        recoverable=False,
+                        attempt=attempt,
+                    )
+                    exec_errors.append(exec_err.model_dump())
+                    errors.append(exec_err.model_dump())
+                    wf_status = WorkflowStatus.FAILED.value
+                    qg_state = "INFRASTRUCTURE_FAILURE"
+                    res = f"Execution Error: {exc}"
+                    outputs[node_id] = res
+                    _add_evt(ExecutionEventType.NODE_FAILED, status="FAILED", duration_ms=node_dur, attempt_num=attempt, msg=str(exc))
+                    _add_evt(ExecutionEventType.WORKFLOW_FAILED, status="FAILED", msg=str(exc))
+                    break
+
+            if wf_status == WorkflowStatus.COMPLETED.value:
+                _add_evt(ExecutionEventType.WORKFLOW_COMPLETED, status="COMPLETED")
+            elif wf_status == WorkflowStatus.BLOCKED.value:
+                _add_evt(ExecutionEventType.WORKFLOW_BLOCKED, status="BLOCKED")
+
+            # Derive ExecutionSummary
+            summary = ExecutionSummary(
+                session_id=sess_id,
+                workflow_status=wf_status,
+                duration_ms=sum(e.get("duration_ms") or 0.0 for e in trace),
+                nodes_executed=len(set(e.get("node_id") for e in trace if e.get("node_id"))),
+                nodes_failed=sum(1 for e in trace if e.get("event_type") == ExecutionEventType.NODE_FAILED.value),
+                retries=sum(1 for e in trace if e.get("event_type") == ExecutionEventType.NODE_RETRIED.value),
+                contract_results={
+                    "plan": "VALID" if val_plan else ("INVALID" if plan_failed else "NOT_CHECKED"),
+                    "code": code_contract_data.get("summary", "NOT_CHECKED") if isinstance(code_contract_data, dict) else ("VALID" if code_contract_data else "NOT_CHECKED"),
+                },
+                rag_status=rag_data.get("status") if isinstance(rag_data, dict) else None,
+                quality_gate=qg_state,
+                reviewer_decision=qg_state if (qg_state and qg_state != "INFRASTRUCTURE_FAILURE") else "NOT_APPROVED",
+                errors=exec_errors,
+            ).model_dump()
 
             return {
                 "current_node": node_id,
@@ -346,6 +544,11 @@ class DynamicGraphCompiler:
                 "validation_results": val_results,
                 "quality_gate": qg_state,
                 "rag_result": rag_data,
+                "reasoning_metadata": reasoning_dict,
+                "workflow_status": wf_status,
+                "execution_errors": exec_errors,
+                "execution_trace": trace,
+                "execution_summary": summary,
                 "errors": errors,
             }
 

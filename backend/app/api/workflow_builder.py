@@ -125,10 +125,14 @@ async def execute_dynamic_workflow(
     final_state = await compiled_graph.ainvoke(initial_state)
 
     return {
-        "status": "completed",
+        "status": final_state.get("workflow_status", "completed"),
         "template_name": tmpl.name,
+        "quality_gate": final_state.get("quality_gate"),
         "nodes_executed": final_state.get("execution_history", []),
         "outputs": final_state.get("node_outputs", {}),
+        "execution_trace": final_state.get("execution_trace", []),
+        "execution_summary": final_state.get("execution_summary"),
+        "errors": final_state.get("errors", []),
     }
 
 

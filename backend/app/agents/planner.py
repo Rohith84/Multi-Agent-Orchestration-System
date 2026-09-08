@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.knowledge.vectorstore.planning_memory import PlanningMemoryStore
 from app.schemas.contracts import PlanContract
+from app.schemas.reasoning import ReasoningMetadata
 from app.orchestration.plan_validator import PlanContractValidator, PlanValidationResult
 
 if TYPE_CHECKING:
@@ -30,11 +31,13 @@ class PlannerResult:
         is_valid: bool,
         contract: PlanContract | None = None,
         errors: list[str] | None = None,
+        reasoning_metadata: ReasoningMetadata | None = None,
     ) -> None:
         self.raw_output = raw_output
         self.is_valid = is_valid
         self.contract = contract
         self.errors = errors or []
+        self.reasoning_metadata = reasoning_metadata
         if contract:
             self.formatted_plan = contract.to_markdown()
         else:
@@ -104,9 +107,15 @@ class PlannerAgent:
 
         system_prompt = (
             "You are the Planner Agent in a multi-agent orchestration system.\n\n"
-            "## Role\n"
-            "You analyze the user request and generate a structured execution plan conforming to the PlanContract schema.\n"
-            "You do NOT write implementation code, test code, or review.\n\n"
+            "## Role & Responsibilities\n"
+            "Analyze the user request, evaluate architectural requirements, and generate a structured execution plan conforming to the PlanContract schema.\n"
+            "Do NOT write implementation code, test execution scripts, or final review output.\n\n"
+            "## Reasoning & Quality Guidelines\n"
+            "- Understand the user's objective before decomposing it into subtasks.\n"
+            "- Consider existing project architecture and prior memories as contextual evidence rather than strict templates.\n"
+            "- Keep plans proportional to task complexity — avoid over-decomposition or redundant subtasks.\n"
+            "- Ensure logical dependency ordering between Research, Coder, Tester, and Reviewer.\n"
+            "- Clearly identify potential risks, unknowns, or trade-offs in the design.\n\n"
             "## Requirements\n"
             "- Subtasks: You MUST provide strictly between 3 and 6 discrete, non-duplicate subtasks.\n"
             "- Allowed agents: 'research', 'coder', 'tester', 'reviewer'.\n"
@@ -129,7 +138,15 @@ class PlannerAgent:
             '    {"id": 4, "agent": "reviewer", "description": "Review quality and architectural evidence", "dependencies": [3]}\n'
             "  ],\n"
             '  "file_manifest": ["app/main.py", "tests/test_main.py"],\n'
-            '  "acceptance_criteria": ["All tests pass cleanly", "No linter errors"]\n'
+            '  "acceptance_criteria": ["All tests pass cleanly", "No linter errors"],\n'
+            '  "reasoning": {\n'
+            '    "decision": "Chosen workflow architecture",\n'
+            '    "evidence_used": ["Project structure", "User requirements"],\n'
+            '    "rationale": "Why this decomposition fits task complexity",\n'
+            '    "alternatives_considered": ["Single monolithic task"],\n'
+            '    "trade_offs": ["Modular separation vs generation overhead"],\n'
+            '    "risks": ["Potential API contract mismatches"]\n'
+            '  }\n'
             "}\n"
             "```\n"
             "Strict rule: Never generate more than 6 subtasks. Never duplicate subtasks."
@@ -150,16 +167,36 @@ class PlannerAgent:
 
         messages.append({"role": "user", "content": prompt})
 
-        raw_response = await self.client.chat(messages, model=self.model, max_tokens=1200)
+        raw_response = await self.client.chat(messages, model=self.model, max_tokens=1400)
 
         # 3. Deterministic Plan Contract Validation
         val_result: PlanValidationResult = PlanContractValidator.validate(raw_response)
+
+        # Extract non-authoritative reasoning metadata if available
+        reasoning_meta: ReasoningMetadata | None = None
+        try:
+            import json, re
+            match = re.search(r"```json\s*(\{.*?\})\s*```", raw_response, re.DOTALL)
+            json_str = match.group(1) if match else raw_response
+            data = json.loads(json_str)
+            if isinstance(data, dict) and "reasoning" in data and isinstance(data["reasoning"], dict):
+                reasoning_meta = ReasoningMetadata(**data["reasoning"])
+            elif isinstance(data, dict):
+                reasoning_meta = ReasoningMetadata(
+                    decision=data.get("task_summary", ""),
+                    evidence_used=["User Request"],
+                    rationale=f"Task decomposed into {len(data.get('subtasks', []))} subtasks.",
+                    risks=[],
+                )
+        except Exception:
+            reasoning_meta = None
 
         return PlannerResult(
             raw_output=raw_response,
             is_valid=val_result.is_valid,
             contract=val_result.contract,
             errors=val_result.errors,
+            reasoning_metadata=reasoning_meta,
         )
 
     async def execute(

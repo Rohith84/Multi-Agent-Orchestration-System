@@ -106,9 +106,9 @@ def create_agent_graph(
             required_agents = ["research", "coder", "tester", "reviewer"]
 
         # Determine if task requires research / coding — using word boundary regex to avoid false substring matches
-        req_text = (state["user_request"] + "\n" + output).lower()
+        req_text = state["user_request"].lower()
         has_coding_keyword = bool(re.search(
-            r'\b(build|create|implement|app|application|dashboard|write|develop|system|feature|ui|api|database|coding|manifest)\b',
+            r'\b(build|create|implement|app|application|dashboard|write|develop|system|feature|ui|api|database|coding)\b',
             req_text
         ))
         is_coding_or_app_task = "coder" in required_agents or has_coding_keyword

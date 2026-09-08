@@ -65,6 +65,32 @@ class ChromaStore:
             return True
         return False
 
+    def _purge_target_collection_sqlite(self, target_name: str) -> None:
+        """Targeted SQLite purge of ONLY the corrupted collection metadata and segments."""
+        import os
+        import sqlite3
+        db_file = os.path.join(self.path, "chroma.sqlite3")
+        if not os.path.exists(db_file):
+            return
+        try:
+            conn = sqlite3.connect(db_file)
+            cursor = conn.cursor()
+            # Fetch target collection id
+            cursor.execute("SELECT id FROM collections WHERE name = ?", (target_name,))
+            rows = cursor.fetchall()
+            if rows:
+                col_ids = [r[0] for r in rows]
+                for cid in col_ids:
+                    cursor.execute("DELETE FROM collection_metadata WHERE collection_id = ?", (cid,))
+                    cursor.execute("DELETE FROM segment_metadata WHERE segment_id IN (SELECT id FROM segments WHERE collection = ?)", (cid,))
+                    cursor.execute("DELETE FROM segments WHERE collection = ?", (cid,))
+                    cursor.execute("DELETE FROM collections WHERE id = ?", (cid,))
+                conn.commit()
+                logger.info("Targeted SQLite cleanup removed corrupted collection '%s' (%d IDs)", target_name, len(col_ids))
+            conn.close()
+        except Exception as e:
+            logger.warning("Targeted SQLite cleanup for collection '%s' encountered: %s", target_name, e)
+
     def _recreate_target_collection(self, client: Any) -> None:
         """
         Safely recreate ONLY self.collection_name with explicit cosine space metadata.
@@ -74,15 +100,30 @@ class ChromaStore:
         if not target or target != self.collection_name:
             raise ValueError(f"Target collection mismatch protection: {target} != {self.collection_name}")
 
+        # 1. Try supported API delete_collection first
         try:
             client.delete_collection(name=target)
         except Exception as del_err:
             logger.debug("Deleting collection '%s' during recovery encountered: %s", target, del_err)
 
-        self._collection = client.create_collection(
-            name=target,
-            metadata={"hnsw:space": "cosine"},
-        )
+        # 2. Try creating collection; if metadata error persists, execute targeted SQLite purge
+        try:
+            self._collection = client.create_collection(
+                name=target,
+                metadata={"hnsw:space": "cosine"},
+            )
+        except Exception as create_err:
+            if self._is_recoverable_metadata_error(create_err):
+                logger.warning("create_collection failed with metadata corruption (%s). Performing targeted SQLite cleanup...", create_err)
+                self._purge_target_collection_sqlite(target)
+                self._client = None
+                fresh_client = self._get_client()
+                self._collection = fresh_client.create_collection(
+                    name=target,
+                    metadata={"hnsw:space": "cosine"},
+                )
+            else:
+                raise
 
     def _get_collection(self) -> Any:
         """Lazy retrieval of the vector collection with targeted recovery for KeyError('_type')."""

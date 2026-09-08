@@ -84,28 +84,30 @@ class ReviewerAgent:
             system_prompt = (
                 "You are the Evidence-Bound Reviewer Agent in a multi-agent orchestration system.\n\n"
                 "## Role & Responsibilities\n"
-                "You perform qualitative architectural code review strictly grounded in deterministic tool evidence.\n\n"
+                "You synthesize all evidence into an evidence-grounded technical review. Deterministic Quality Gate decisions remain strictly authoritative.\n\n"
                 "## Critical Evidence Rules (MANDATORY)\n"
-                "1. Deterministic tool results and Quality Gate decisions are authoritative for execution status.\n"
-                "2. INFRASTRUCTURE_ERROR (e.g. FileNotFoundError, TimeoutExpired, tool process execution error) is an infrastructure failure, NOT a code defect, lint error, or test failure. If a tool has status INFRASTRUCTURE_ERROR, state clearly that tool execution failed due to an infrastructure error and code quality cannot be evaluated from this evidence. NEVER claim linter found errors or tests failed when tool execution failed.\n"
+                "1. Deterministic tool results and Quality Gate decisions are authoritative. Reviewer reasoning MUST NOT override Quality Gate status.\n"
+                "2. INFRASTRUCTURE_ERROR is an infrastructure failure, NOT a code defect, lint error, or test failure. State clearly that tool execution failed due to an infrastructure error.\n"
                 "3. Distinguish OBSERVED FACTS (actual output in tool evidence) from INFERENCES (speculation). Never present inferences as confirmed facts.\n"
-                "4. For CodeContract CONTRACT_FAILURE, reference only the actual recorded contract violations (missing manifest files, syntax errors, empty files, placeholders, pass stubs). Do not invent additional violations.\n"
-                "5. For RAG evidence:\n"
-                "   - RAG_INFRASTRUCTURE_ERROR means Knowledge Base retrieval failed. Never state 'no documents were found'.\n"
-                "   - RAG_EMPTY means retrieval succeeded but returned 0 documents.\n"
-                "   - RAG_SUCCESS means retrieved documents are available with citations.\n"
-                "6. If evidence is marked UNAVAILABLE, explicitly state that evidence is unavailable rather than assuming PASS or FAIL.\n"
-                "7. Do not claim broader guarantees than the evidence supports (e.g. do not claim code is 'Production-ready' unless checks explicitly verify it).\n\n"
-                "## Output Format\n"
-                "Provide one concise structured review containing:\n"
-                "- **Review Summary**: Concise evidence-bound summary.\n"
-                "- **Correctness**: Evidence-bound assessment.\n"
-                "- **Architecture**: Component structure and design patterns.\n"
-                "- **Security Findings**: Evidence-bound security assessment.\n"
-                "- **Code Quality**: Readability, maintainability, and standards.\n"
-                "- **Test Result Assessment**: Based strictly on test output.\n"
-                "- **Quality Score**: Score out of 100.\n"
-                "- **Final Status**: APPROVED / APPROVED_WITH_WARNINGS / REJECTED.\n"
+                "4. For CodeContract CONTRACT_FAILURE, reference only actual recorded violations. Do not invent violations.\n"
+                "5. For RAG evidence: RAG_INFRASTRUCTURE_ERROR means retrieval failed (never claim 'no documents exist'); RAG_EMPTY means 0 matching documents; RAG_SUCCESS means retrieved evidence is available.\n"
+                "6. If evidence is marked UNAVAILABLE, state that evidence is unavailable rather than assuming PASS or FAIL.\n\n"
+                "## Output Format (REQUIRED SECTIONS)\n"
+                "Structure your review using these exact headings:\n"
+                "## OBSERVED FACTS\n"
+                "Facts supported directly by recorded evidence.\n\n"
+                "## TECHNICAL ASSESSMENT\n"
+                "Reasoned interpretation of code structure and evidence.\n\n"
+                "## STRENGTHS\n"
+                "Verified strengths supported by evidence.\n\n"
+                "## WEAKNESSES\n"
+                "Observed weaknesses supported by evidence.\n\n"
+                "## RISKS\n"
+                "Potential risks, explicitly labeled as inferences where appropriate.\n\n"
+                "## RECOMMENDATIONS\n"
+                "Concrete technical improvements supported by evidence.\n\n"
+                "## FINAL REVIEW\n"
+                "Final synthesis explaining the authoritative Quality Gate result."
             )
 
             prompt = (
@@ -115,15 +117,30 @@ class ReviewerAgent:
                 f"{evidence_section}\n\n{tester_section}\n\n{code_section}"
             )
 
-            llm_review = await self._request_qualitative_review(
-                system_prompt=system_prompt,
-                prompt=prompt,
-                authoritative_gate=authoritative_gate,
-            )
+            reviewer_status = "SUCCESS"
+            try:
+                llm_review = await self._request_qualitative_review(
+                    system_prompt=system_prompt,
+                    prompt=prompt,
+                    authoritative_gate=authoritative_gate,
+                )
+            except Exception as e:
+                logger.error("Reviewer Agent execution failed: %s", e)
+                reviewer_status = "EXECUTION_ERROR"
+                final_decision_label = "NOT_APPROVED"
+                if authoritative_gate == "PASS":
+                    authoritative_gate = "INFRASTRUCTURE_FAILURE"
+                llm_review = (
+                    "### Review Summary\n"
+                    f"Reviewer execution failed due to a runtime error or timeout ({e}). "
+                    "Qualitative review could not be completed.\n\n"
+                    "## FINAL REVIEW\n"
+                    f"Reviewer Execution Error: NOT_APPROVED"
+                )
 
         quality_gate = authoritative_gate
         raw_score = self._parse_quality_score(llm_review, quality_gate)
-        overall_score = min(raw_score, 40.0) if deterministic_failed else raw_score
+        overall_score = min(raw_score, 40.0) if (deterministic_failed or reviewer_status == "EXECUTION_ERROR") else raw_score
 
         text_output = (
             f"{llm_review}\n\n"
@@ -257,17 +274,20 @@ class ReviewerAgent:
         # Ruff
         ruff_st, ruff_detail, ruff_raw = process_tool("ruff", "Ruff")
         lines.append(f"Ruff Linter Status: {ruff_st}")
+        lines.append(f"Ruff Status: {ruff_st}")
         lines.append(f"Ruff Evidence Detail:\n{ruff_detail[:800]}\n")
         lint_findings.append({"tool": "ruff", "status": ruff_st, "output": ruff_raw[:1000]})
 
         # Pytest
         pytest_st, pytest_detail, pytest_raw = process_tool("pytest", "Pytest")
         lines.append(f"Pytest Execution Status: {pytest_st}")
+        lines.append(f"Pytest Status: {pytest_st}")
         lines.append(f"Pytest Evidence Detail:\n{pytest_detail[:800]}\n")
 
         # Bandit
         bandit_st, bandit_detail, bandit_raw = process_tool("bandit", "Bandit")
         lines.append(f"Bandit Security Status: {bandit_st}")
+        lines.append(f"Bandit Status: {bandit_st}")
         lines.append(f"Bandit Evidence Detail:\n{bandit_detail[:800]}\n")
         security_findings.append({"tool": "bandit", "status": bandit_st, "output": bandit_raw[:1000]})
 

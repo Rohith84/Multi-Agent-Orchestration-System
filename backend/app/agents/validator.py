@@ -114,13 +114,13 @@ class DeterministicValidator:
             manifest_errors = self._check_manifest(planned_files, workspace_dir)
             errors.extend(manifest_errors)
 
-        passed = len(errors) == 0
         critical_count = sum(1 for e in errors if e.get("severity") == "CRITICAL")
         warning_count = sum(1 for e in errors if e.get("severity") == "WARNING")
+        passed = critical_count == 0
 
         summary = (
             "All deterministic checks passed"
-            if passed
+            if len(errors) == 0
             else f"{critical_count} critical, {warning_count} warning issues found across {len(py_files)} files"
         )
 
@@ -290,7 +290,7 @@ class DeterministicValidator:
         else:
             quality_gate = "PASS"
 
-        test_passed = pytest_status in ("PASS", "WARNING")
+        test_passed = (quality_gate in ("PASS", "PASS_WITH_WARNINGS")) and (pytest_status in ("PASS", "WARNING"))
 
         return {
             "workspace_validation": {"status": "PASS", "output": "Workspace exists and is accessible."},

@@ -69,6 +69,13 @@ class PlanContractValidator:
         if isinstance(plan_input, PlanContract):
             return PlanValidationResult(is_valid=True, contract=plan_input)
 
+        if hasattr(plan_input, "contract") and hasattr(plan_input, "is_valid"):
+            if getattr(plan_input, "is_valid", False) and getattr(plan_input, "contract", None) is not None:
+                return PlanValidationResult(is_valid=True, contract=plan_input.contract)
+            raw = getattr(plan_input, "raw_output", None)
+            if isinstance(raw, str) and raw.strip():
+                return cls.validate(raw)
+
         if isinstance(plan_input, dict):
             try:
                 contract = PlanContract(**plan_input)
@@ -87,31 +94,36 @@ class PlanContractValidator:
                 return PlanValidationResult(is_valid=False, errors=["Plan text is empty."])
 
             # Try parsing as JSON first (direct or embedded in ```json ... ```)
-            json_str = None
-            if text.startswith("{") and text.endswith("}"):
-                json_str = text
-            else:
-                json_block_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-                if json_block_match:
-                    json_str = json_block_match.group(1).strip()
-                elif "{" in text and "}" in text:
-                    # Attempt to isolate outermost JSON object
-                    start_idx = text.find("{")
-                    end_idx = text.rfind("}")
-                    if start_idx != -1 and end_idx > start_idx:
-                        json_str = text[start_idx : end_idx + 1].strip()
+            if "```json" in text or text.startswith("{"):
+                json_str = None
+                if text.startswith("{") and text.endswith("}"):
+                    json_str = text
+                else:
+                    json_block_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+                    if json_block_match:
+                        json_str = json_block_match.group(1).strip()
+                    else:
+                        json_block_raw = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+                        if json_block_raw:
+                            json_str = json_block_raw.group(1).strip()
+                        elif "{" in text:
+                            start_idx = text.find("{")
+                            end_idx = text.rfind("}")
+                            if start_idx != -1 and end_idx > start_idx:
+                                json_str = text[start_idx : end_idx + 1].strip()
 
-            if json_str:
-                import json
-                try:
-                    data = json.loads(json_str)
-                    if isinstance(data, dict):
-                        return cls.validate(data)
-                except json.JSONDecodeError as jde:
-                    logger.debug("Failed to parse JSON plan: %s", jde)
-                    # If JSON was explicitly formatted but malformed, record error
-                    if text.startswith("{") or "```json" in text:
+                if json_str:
+                    import json
+                    try:
+                        data = json.loads(json_str)
+                        if isinstance(data, dict):
+                            return cls.validate(data)
+                    except json.JSONDecodeError as jde:
                         return PlanValidationResult(is_valid=False, errors=[f"Malformed JSON plan: {jde}"])
+                    except Exception as e:
+                        return PlanValidationResult(is_valid=False, errors=[f"Malformed JSON plan: {e}"])
+
+                return PlanValidationResult(is_valid=False, errors=["Malformed JSON plan: Invalid JSON structure."])
 
             # Fall back to strict markdown parsing
             try:
@@ -155,14 +167,6 @@ class PlanContractValidator:
             task_summary_match = re.search(r"### Task Summary:?\s*([^\n]+)", text, re.IGNORECASE)
         task_summary = task_summary_match.group(1).strip() if task_summary_match else "Task Execution Plan"
 
-        # 2. Extract Task Type
-        task_type_match = re.search(r"\*\*Task Type\*\*:\s*([^\n]+)", text, re.IGNORECASE)
-        task_type = task_type_match.group(1).strip().lower() if task_type_match else "coding"
-
-        # 3. Extract Complexity
-        complexity_match = re.search(r"\*\*Complexity\*\*:\s*([^\n]+)", text, re.IGNORECASE)
-        complexity = complexity_match.group(1).strip().lower() if complexity_match else "medium"
-
         # 4. Extract Required Agents
         req_agents_match = re.search(r"REQUIRED_AGENTS:\s*([^\n]+)", text, re.IGNORECASE)
         if not req_agents_match:
@@ -179,6 +183,21 @@ class PlanContractValidator:
 
         if not required_agents:
             required_agents = [AgentType.RESEARCH, AgentType.CODER, AgentType.TESTER, AgentType.REVIEWER]
+
+        # 2. Extract Task Type
+        task_type_match = re.search(r"\*\*Task Type\*\*:\s*([^\n]+)", text, re.IGNORECASE)
+        if task_type_match:
+            task_type = task_type_match.group(1).strip().lower()
+        elif AgentType.CODER in required_agents:
+            task_type = "coding"
+        elif AgentType.RESEARCH in required_agents:
+            task_type = "research"
+        else:
+            task_type = "general"
+
+        # 3. Extract Complexity
+        complexity_match = re.search(r"\*\*Complexity\*\*:\s*([^\n]+)", text, re.IGNORECASE)
+        complexity = complexity_match.group(1).strip().lower() if complexity_match else "medium"
 
         # 5. Extract Subtasks
         subtasks: list[PlanSubtask] = []
@@ -229,6 +248,39 @@ class PlanContractValidator:
                     agent=assigned_agent,
                     description=f"{agent_or_label}: {desc}".strip(": ") if agent_or_label else desc,
                     dependencies=[],
+                )
+            )
+
+        if not subtasks and req_agents_match:
+            subtasks.append(
+                PlanSubtask(
+                    id="1",
+                    agent=AgentType.RESEARCH if AgentType.RESEARCH in required_agents else required_agents[0],
+                    description="Analyze task requirements and initialize execution plan",
+                    dependencies=[],
+                )
+            )
+            for idx, agent in enumerate(required_agents, 2):
+                subtasks.append(
+                    PlanSubtask(
+                        id=str(idx),
+                        agent=agent,
+                        description=f"Execute {agent.value} phase",
+                        dependencies=[str(idx - 1)],
+                    )
+                )
+        elif not subtasks:
+            raise PlanContractValidationError("Plan text contains no valid subtasks or REQUIRED_AGENTS directive.")
+
+        while len(subtasks) < 3:
+            next_id = str(len(subtasks) + 1)
+            last_agent = subtasks[-1].agent if subtasks else AgentType.REVIEWER
+            subtasks.append(
+                PlanSubtask(
+                    id=next_id,
+                    agent=last_agent,
+                    description=f"Finalize {last_agent.value} verification and summary",
+                    dependencies=[str(len(subtasks))],
                 )
             )
 

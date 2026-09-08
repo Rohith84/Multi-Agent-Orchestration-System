@@ -42,6 +42,31 @@ class PlanningMemoryStore:
             self._client = chromadb.PersistentClient(path=self.path)
         return self._client
 
+    def _purge_target_collection_sqlite(self, target_name: str) -> None:
+        """Targeted SQLite purge of ONLY the corrupted collection metadata and segments."""
+        import os
+        import sqlite3
+        db_file = os.path.join(self.path, "chroma.sqlite3")
+        if not os.path.exists(db_file):
+            return
+        try:
+            conn = sqlite3.connect(db_file)
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM collections WHERE name = ?", (target_name,))
+            rows = cursor.fetchall()
+            if rows:
+                col_ids = [r[0] for r in rows]
+                for cid in col_ids:
+                    cursor.execute("DELETE FROM collection_metadata WHERE collection_id = ?", (cid,))
+                    cursor.execute("DELETE FROM segment_metadata WHERE segment_id IN (SELECT id FROM segments WHERE collection = ?)", (cid,))
+                    cursor.execute("DELETE FROM segments WHERE collection = ?", (cid,))
+                    cursor.execute("DELETE FROM collections WHERE id = ?", (cid,))
+                conn.commit()
+                logger.info("Targeted SQLite cleanup removed corrupted planning memory collection '%s' (%d IDs)", target_name, len(col_ids))
+            conn.close()
+        except Exception as e:
+            logger.warning("Targeted SQLite cleanup for planning memory collection '%s' encountered: %s", target_name, e)
+
     def _get_collection(self) -> Any:
         if self._collection is None:
             client = self._get_client()
@@ -73,7 +98,19 @@ class PlanningMemoryStore:
                             )
             except Exception as e:
                 err_str = str(e).lower()
-                if "does not exist" in err_str or "not found" in err_str or "notfound" in type(e).__name__.lower():
+                if isinstance(e, KeyError) or "_type" in err_str:
+                    logger.warning("Targeted recovery for planning memory collection '%s' (%s)", self.collection_name, e)
+                    self._purge_target_collection_sqlite(self.collection_name)
+                    self._client = None
+                    fresh_client = self._get_client()
+                    try:
+                        self._collection = fresh_client.create_collection(
+                            name=self.collection_name,
+                            metadata={"hnsw:space": "cosine"}
+                        )
+                    except Exception:
+                        self._collection = None
+                elif "does not exist" in err_str or "not found" in err_str or "notfound" in type(e).__name__.lower():
                     # Collection does not exist
                     logger.info("ChromaDB collection '%s' does not exist. Creating...", self.collection_name)
                     try:
@@ -89,10 +126,13 @@ class PlanningMemoryStore:
                         )
                 else:
                     logger.exception("Failed to get/verify Planning Memory collection: %s", self.collection_name)
-                    self._collection = client.get_or_create_collection(
-                        name=self.collection_name,
-                        metadata={"hnsw:space": "cosine"}
-                    )
+                    try:
+                        self._collection = client.get_or_create_collection(
+                            name=self.collection_name,
+                            metadata={"hnsw:space": "cosine"}
+                        )
+                    except Exception:
+                        self._collection = None
         return self._collection
 
     async def add_plan(

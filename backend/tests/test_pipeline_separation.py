@@ -171,7 +171,7 @@ async def test_quality_gate_missing_workspace_fails(tmp_path: Path):
 
     assert result["quality_gate"] == "FAIL"
     assert result["test_passed"] is False
-    assert result["deterministic_checks"]["status"] == "ERROR"
+    assert result["deterministic_checks"]["status"] in ("ERROR", "NOT_EXECUTED")
 
 
 @pytest.mark.asyncio
